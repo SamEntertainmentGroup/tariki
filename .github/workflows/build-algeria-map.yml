@@ -12,7 +12,7 @@ on:
           - algerie-complete
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -97,6 +97,17 @@ jobs:
         run: |
           python3 tools/inspect_mbtiles.py out/algeria-map.mbtiles | tee out/report.txt
           { echo '```'; cat out/report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish map to release
+        if: inputs.zone == 'algerie-complete'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete map-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create map-latest --repo "$GITHUB_REPOSITORY" \
+            --title "Carte Algérie (routes et lieux)" \
+            --notes "Générée par le workflow Build Algeria offline map, exécution ${{ github.run_number }}." \
+            out/algeria-map.mbtiles out/report.txt
 
       - name: Upload map
         uses: actions/upload-artifact@v4

@@ -1,0 +1,71 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run self-tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Download map from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p android/app/src/main/assets
+          gh release download map-latest --repo "$GITHUB_REPOSITORY" \
+            --pattern algeria-map.mbtiles --dir android/app/src/main/assets
+          ls -l android/app/src/main/assets
+
+      - name: Check map file
+        shell: bash
+        run: |
+          python3 tools/inspect_mbtiles.py android/app/src/main/assets/algeria-map.mbtiles | tee map-report.txt
+
+      - name: Download label fonts
+        shell: bash
+        run: |
+          python3 tools/fetch_glyphs.py --output android/app/src/main/assets/glyphs | tee glyph-report.txt
+          { echo '```'; cat map-report.txt; echo; cat glyph-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Build debug APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Check APK content
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          ls -l "$APK"
+          for entry in assets/style.json assets/algeria-map.mbtiles assets/glyphs/NotoSans-Regular/0-255.pbf; do
+            unzip -l "$APK" | grep -q "$entry" || { echo "Manquant dans l'APK : $entry"; exit 1; }
+          done
+          echo "Contenu de l'APK vérifié"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dz-carte-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
