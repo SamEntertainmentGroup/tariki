@@ -1,19 +1,30 @@
-# Carte hors ligne de l'Algérie (routes et noms de lieux)
+# DZ Carte — carte hors ligne de l'Algérie
 
-Fabrique `algeria-map.mbtiles` : une carte vectorielle qui ne contient que les routes et les noms de lieux (villes, villages, hameaux), à partir du fichier OpenStreetMap de Geofabrik.
+Deux workflows GitHub Actions :
 
-## Utilisation
+1. **Build Algeria offline map** : fabrique `algeria-map.mbtiles` (routes et noms de lieux) à partir du fichier OpenStreetMap de Geofabrik, et le publie dans la Release `map-latest` (zone `algerie-complete` seulement).
+2. **Build Android APK** : télécharge cette carte et les polices, puis compile l'APK de test (`android/`).
 
-1. Crée un dépôt GitHub et envoie-y les dossiers `.github`, `tools` et `tests` tels quels (le dossier `.github` est caché : sous Linux, Ctrl+H dans le gestionnaire de fichiers).
-2. Onglet **Actions** → **Build Algeria offline map** → **Run workflow**.
-3. Premier essai : zone `test-alger`. Le rapport s'affiche en bas de la page de l'exécution (Summary) et dans l'artefact `report.txt`.
-4. Si tout va bien, relance avec `algerie-complete`.
+## Étapes
 
-## Contenu
+1. Envoie dans ton dépôt les dossiers `.github`, `tools`, `tests` et `android` (en remplaçant les fichiers existants). Le dossier `.github` est caché : sous Linux, Ctrl+H.
+2. Publie la carte dans la Release `map-latest`, soit en relançant **Build Algeria offline map** avec `algerie-complete`, soit à la main : Releases → Draft a new release → tag `map-latest` → dépose `algeria-map.mbtiles` → Publish.
+3. Lance **Build Android APK**. Le résumé de l'exécution montre le contrôle de la carte et celui des polices (dont l'arabe).
+4. Télécharge l'artefact `dz-carte-apk`, décompresse-le, installe `app-debug.apk` sur le téléphone (autoriser les sources inconnues).
+5. Teste en mode avion.
 
-- Couche `roads` : propriétés `class` (motorway, trunk, primary, secondary, tertiary, minor) et `ref` si elle existe. Les routes secondaires apparaissent à partir du zoom 9, les tertiaires 11, les petites rues 12.
-- Couche `places` : propriétés `class` (city, town, village, hamlet, suburb), `name`, `name_ar`, `name_fr` quand ils existent dans OpenStreetMap. Zooms 4 à 14.
+## L'appli
 
-## Vérifications
+- Carte vectorielle locale : routes par importance, numéros de route, noms de lieux.
+- Position GPS, avec la carte qui tourne selon la direction (bouton Cap / Nord).
+- Bouton AR / FR pour la langue des noms, bouton ◎ pour recentrer.
+- Au premier lancement, la carte est copiée dans le stockage de l'appli (quelques secondes).
 
-Tests unitaires à chaque exécution, puis rapport sur le fichier produit (couches présentes, nombre et poids des tuiles par niveau de zoom). L'étape échoue si une couche manque ou si le fichier est vide.
+## Contenu technique
+
+- `tools/prepare_layers.py`, `tools/inspect_mbtiles.py` : préparation et contrôle de la carte.
+- `tools/fetch_glyphs.py` : télécharge les polices (Noto Sans Regular, Protomaps basemaps-assets) et vérifie la couverture de l'arabe.
+- `android/app/src/main/assets/style.json` : style de la carte.
+- `tests/` : tests automatiques, lancés à chaque exécution.
+
+© OpenStreetMap contributors (ODbL).
