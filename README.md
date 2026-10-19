@@ -1,30 +1,36 @@
-# DZ Carte — carte hors ligne de l'Algérie
+# DZ Carte — carte hors ligne, GPS et alertes (Algérie)
 
 Deux workflows GitHub Actions :
 
-1. **Build Algeria offline map** : fabrique `algeria-map.mbtiles` (routes et noms de lieux) à partir du fichier OpenStreetMap de Geofabrik, et le publie dans la Release `map-latest` (zone `algerie-complete` seulement).
-2. **Build Android APK** : télécharge cette carte et les polices, puis compile l'APK de test (`android/`).
+1. **Build Algeria offline map** : fabrique `algeria-map.mbtiles` (routes, noms de lieux, côte, limites du pays, des wilayas et des communes) et `places-index.json` (recherche de lieux), puis les publie dans la Release `map-latest` (zone `algerie-complete` seulement).
+2. **Build Android APK** : télécharge la carte, l'index et les polices, puis compile l'APK de test (`android/`).
 
 ## Étapes
 
 1. Envoie dans ton dépôt les dossiers `.github`, `tools`, `tests` et `android` (en remplaçant les fichiers existants). Le dossier `.github` est caché : sous Linux, Ctrl+H.
-2. Publie la carte dans la Release `map-latest`, soit en relançant **Build Algeria offline map** avec `algerie-complete`, soit à la main : Releases → Draft a new release → tag `map-latest` → dépose `algeria-map.mbtiles` → Publish.
-3. Lance **Build Android APK**. Le résumé de l'exécution montre le contrôle de la carte et celui des polices (dont l'arabe).
-4. Télécharge l'artefact `dz-carte-apk`, décompresse-le, installe `app-debug.apk` sur le téléphone (autoriser les sources inconnues).
-5. Teste en mode avion.
+2. Définis l'adresse du serveur : Settings → Secrets and variables → Actions → onglet **Variables** → New repository variable `ALERTS_URL` = `https://ton-site/wp-admin/admin-ajax.php`.
+3. Lance **Build Algeria offline map** : d'abord `test-alger` (contrôle du rapport), puis `algerie-complete` (publie la Release `map-latest`).
+4. Lance **Build Android APK**, télécharge l'artefact `dz-carte-apk`, installe `app-debug.apk`.
 
 ## L'appli
 
-- Carte vectorielle locale : routes par importance, numéros de route, noms de lieux.
-- Position GPS, avec la carte qui tourne selon la direction (bouton Cap / Nord).
-- Bouton AR / FR pour la langue des noms, bouton ◎ pour recentrer.
-- Au premier lancement, la carte est copiée dans le stockage de l'appli (quelques secondes).
+- Carte vectorielle locale (zoom minimal 5) : routes, numéros de route, côte, limites du pays, des wilayas et des communes, et noms de lieux dès le zoom 4 (villes), 5 (villes moyennes), 6 (villages), 8 (hameaux) ; les lieux les plus peuplés passent en premier quand les noms se chevauchent.
+- Position GPS, vitesse en km/h, distance et durée du trajet (appui long sur le compteur : remise à zéro).
+- Bouton **GPS** : le suivi tourne en arrière-plan avec une notification (bouton Stop dedans), écran éteint. Bouton ☀ : garde l'écran allumé.
+- **Alertes** : bouton « تبليغ » (route cassée, accident, danger), alertes affichées sur la carte (toucher une alerte : détail), double bip et voyant rouge à 200 m et 100 m, question « هل التبليغ صحيح؟ » après le passage.
+- Un signalement fait sans réseau est mis en attente et envoyé dès le retour de la connexion ; les dernières alertes reçues restent disponibles hors ligne.
+- Recherche 🔍 d'une ville, commune ou village (arabe ou français, sans accents).
+- Boutons AR / FR (langue des noms), Cap / Nord (rotation), ◎ (recentrer).
+
+## Serveur
+
+L'appli utilise les mêmes actions `admin-ajax.php` que le site (`dztrafic_get_alerts`, `dztrafic_add_alert`, `dztrafic_confirm_alert` et leurs nonces) : les règles anti-spam, les durées de vie et la vérification de la route restent côté WordPress.
 
 ## Contenu technique
 
-- `tools/prepare_layers.py`, `tools/inspect_mbtiles.py` : préparation et contrôle de la carte.
-- `tools/fetch_glyphs.py` : télécharge les polices (Noto Sans Regular, Protomaps basemaps-assets) et vérifie la couverture de l'arabe.
+- `tools/` : préparation de la carte (`prepare_layers.py`), index de recherche (`build_search_index.py`), contrôle (`inspect_mbtiles.py`), polices (`fetch_glyphs.py`).
 - `android/app/src/main/assets/style.json` : style de la carte.
+- `android/app/src/main/java/com/dztrafic/carte/` : l'appli (service de suivi, alertes, recherche, écran principal).
 - `tests/` : tests automatiques, lancés à chaque exécution.
 
 © OpenStreetMap contributors (ODbL).

@@ -36,6 +36,16 @@ class InspectTest(unittest.TestCase):
         self.assertIn("2 tuiles", report)
         self.assertIn("Contrôles : OK", report)
 
+    def test_optional_layers_are_informational(self):
+        path = make_mbtiles(["roads", "places"], [(4, 0, 0, b"x")])
+        report, ok = im.inspect(path)
+        self.assertTrue(ok)
+        self.assertIn("Couches facultatives absentes : borders, coast", report)
+        path = make_mbtiles(["roads", "places", "borders", "coast"], [(4, 0, 0, b"x")])
+        report, ok = im.inspect(path)
+        self.assertTrue(ok)
+        self.assertIn("Couches facultatives absentes : aucune", report)
+
     def test_missing_layer_is_reported(self):
         path = make_mbtiles(["roads"], [(4, 0, 0, b"x")])
         report, ok = im.inspect(path)

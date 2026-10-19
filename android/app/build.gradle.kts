@@ -12,10 +12,15 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1"
+        versionName = "0.2"
+        buildConfigField("String", "ALERTS_URL", "\"${providers.gradleProperty("alertsUrl").getOrElse("")}\"")
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     androidResources {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn osmium GeoJSON sequences into lean tippecanoe inputs (roads and place names)."""
+"""Turn osmium GeoJSON sequences into lean tippecanoe inputs (roads, places, borders, coast)."""
 
 import argparse
 import json
@@ -19,7 +19,9 @@ ROAD_CLASSES = {
 }
 LINK_MIN_ZOOM = 10
 LINK_ZOOM_OFFSET = 2
-PLACE_MIN_ZOOM = {"city": 4, "town": 7, "village": 10, "hamlet": 12, "suburb": 12}
+PLACE_MIN_ZOOM = {"city": 4, "town": 5, "village": 6, "hamlet": 8, "suburb": 9}
+BORDER_MIN_ZOOM = {"2": 4, "4": 6, "8": 10}
+COAST_MIN_ZOOM = 4
 COORDINATE_DECIMALS = 6
 
 
@@ -41,6 +43,17 @@ def clean_text(value):
     return " ".join(value.split()) if isinstance(value, str) else ""
 
 
+def line_positions(geometry):
+    if geometry.get("type") != "LineString":
+        return None, "géométrie non linéaire"
+    positions = geometry.get("coordinates")
+    if not isinstance(positions, list) or len(positions) < 2:
+        return None, "géométrie trop courte"
+    if not all(valid_position(position) for position in positions):
+        return None, "coordonnées invalides"
+    return [rounded(position) for position in positions], None
+
+
 def road_feature(feature):
     properties = feature.get("properties") or {}
     geometry = feature.get("geometry") or {}
@@ -49,13 +62,9 @@ def road_feature(feature):
     base = highway[: -len("_link")] if is_link else highway
     if base not in ROAD_CLASSES:
         return None, "type de route non retenu"
-    if geometry.get("type") != "LineString":
-        return None, "géométrie non linéaire"
-    positions = geometry.get("coordinates")
-    if not isinstance(positions, list) or len(positions) < 2:
-        return None, "géométrie trop courte"
-    if not all(valid_position(position) for position in positions):
-        return None, "coordonnées invalides"
+    positions, problem = line_positions(geometry)
+    if problem:
+        return None, problem
 
     road_class, min_zoom = ROAD_CLASSES[base]
     if is_link:
@@ -67,9 +76,14 @@ def road_feature(feature):
     return {
         "type": "Feature",
         "properties": output,
-        "geometry": {"type": "LineString", "coordinates": [rounded(p) for p in positions]},
+        "geometry": {"type": "LineString", "coordinates": positions},
         "tippecanoe": {"minzoom": min_zoom},
     }, road_class
+
+
+def population_value(value):
+    digits = "".join(char for char in clean_text(value) if char.isdigit())
+    return int(digits) if digits else 0
 
 
 def place_feature(feature):
@@ -91,12 +105,50 @@ def place_feature(feature):
     for key, value in (("name", name), ("name_ar", name_ar), ("name_fr", name_fr)):
         if value:
             output[key] = value
+    population = population_value(properties.get("population"))
+    if population > 0:
+        output["population"] = population
     return {
         "type": "Feature",
         "properties": output,
         "geometry": {"type": "Point", "coordinates": rounded(geometry["coordinates"])},
         "tippecanoe": {"minzoom": PLACE_MIN_ZOOM[place]},
     }, place
+
+
+def border_feature(feature):
+    properties = feature.get("properties") or {}
+    if properties.get("boundary") != "administrative":
+        return None, "limite non administrative"
+    if properties.get("maritime") == "yes":
+        return None, "limite maritime"
+    level = clean_text(properties.get("admin_level"))
+    if level not in BORDER_MIN_ZOOM:
+        return None, "niveau administratif non retenu"
+    positions, problem = line_positions(feature.get("geometry") or {})
+    if problem:
+        return None, problem
+    return {
+        "type": "Feature",
+        "properties": {"level": int(level)},
+        "geometry": {"type": "LineString", "coordinates": positions},
+        "tippecanoe": {"minzoom": BORDER_MIN_ZOOM[level]},
+    }, f"niveau {level}"
+
+
+def coast_feature(feature):
+    properties = feature.get("properties") or {}
+    if properties.get("natural") != "coastline":
+        return None, "pas une côte"
+    positions, problem = line_positions(feature.get("geometry") or {})
+    if problem:
+        return None, problem
+    return {
+        "type": "Feature",
+        "properties": {},
+        "geometry": {"type": "LineString", "coordinates": positions},
+        "tippecanoe": {"minzoom": COAST_MIN_ZOOM},
+    }, "côte"
 
 
 def convert(source, target, converter):
@@ -131,27 +183,36 @@ def describe(title, kept, skipped):
     return "\n".join(lines)
 
 
+LAYERS = (
+    ("roads", "Routes", road_feature, True),
+    ("places", "Lieux", place_feature, True),
+    ("borders", "Limites", border_feature, False),
+    ("coast", "Côte", coast_feature, False),
+)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--roads-in", required=True, type=Path)
-    parser.add_argument("--roads-out", required=True, type=Path)
-    parser.add_argument("--places-in", required=True, type=Path)
-    parser.add_argument("--places-out", required=True, type=Path)
+    for name, _, _, _ in LAYERS:
+        parser.add_argument(f"--{name}-in", type=Path)
+        parser.add_argument(f"--{name}-out", type=Path)
     args = parser.parse_args()
 
-    for path in (args.roads_in, args.places_in):
-        if not path.is_file():
-            parser.error(f"Fichier introuvable : {path}")
-
-    roads_kept, roads_skipped = convert(args.roads_in, args.roads_out, road_feature)
-    places_kept, places_skipped = convert(args.places_in, args.places_out, place_feature)
-    print(describe("Routes", roads_kept, roads_skipped))
-    print(describe("Lieux", places_kept, places_skipped))
-
-    if not roads_kept or not places_kept:
-        print("ÉCHEC : aucune route ou aucun lieu conservé", file=sys.stderr)
-        return 1
-    return 0
+    failed = False
+    for name, title, converter, required in LAYERS:
+        source, target = getattr(args, f"{name}_in"), getattr(args, f"{name}_out")
+        if source is None and target is None and not required:
+            continue
+        if source is None or target is None:
+            parser.error(f"--{name}-in et --{name}-out vont ensemble")
+        if not source.is_file():
+            parser.error(f"Fichier introuvable : {source}")
+        kept, skipped = convert(source, target, converter)
+        print(describe(title, kept, skipped))
+        if required and not kept:
+            print(f"ÉCHEC : aucun élément conservé pour {title.lower()}", file=sys.stderr)
+            failed = True
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

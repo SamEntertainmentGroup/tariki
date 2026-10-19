@@ -12,7 +12,7 @@ import prepare_layers
 STYLE_PATH = ROOT / "android" / "app" / "src" / "main" / "assets" / "style.json"
 TEXT_FIELD_ARABIC = '["coalesce",["get","name_ar"],["get","name"],["get","name_fr"]]'
 TEXT_FIELD_FRENCH = '["coalesce",["get","name_fr"],["get","name"],["get","name_ar"]]'
-SOURCE_LAYERS = {"roads", "places"}
+SOURCE_LAYERS = {"roads", "places", "borders", "coast"}
 
 
 def load_style(text_field=TEXT_FIELD_ARABIC):
@@ -64,7 +64,7 @@ class StyleTest(unittest.TestCase):
         ids = [layer["id"] for layer in style["layers"]]
         self.assertEqual(len(ids), len(set(ids)))
         for layer in style["layers"]:
-            if layer["type"] == "background":
+            if layer["type"] == "background" or layer["id"] == "alerts":
                 continue
             self.assertEqual(layer["source"], "algeria")
             self.assertIn(layer["source-layer"], SOURCE_LAYERS)
@@ -112,6 +112,53 @@ class StyleTest(unittest.TestCase):
             "geometry": {"type": "LineString", "coordinates": [[3.0, 36.0], [3.1, 36.1]]},
         })
         self.assertEqual(set(road["properties"]), {"class", "ref"})
+
+    def test_border_and_coast_layers_sit_below_roads(self):
+        style = load_style()
+        order = [layer["id"] for layer in style["layers"]]
+        below = ["coast", "border-8", "border-4", "border-2"]
+        for name in below:
+            self.assertIn(name, order)
+            self.assertLess(order.index(name), order.index("road-casing-minor"))
+        self.assertEqual(order[0], "background")
+
+    def test_border_levels_exist_in_tiles(self):
+        style = load_style()
+        produced = {int(level) for level in prepare_layers.BORDER_MIN_ZOOM}
+        drawn = set()
+        for layer in style["layers"]:
+            if layer.get("source-layer") == "borders":
+                self.assertEqual(layer["filter"][0:2], ["==", ["get", "level"]])
+                drawn.add(layer["filter"][2])
+                self.assertGreaterEqual(layer["minzoom"], prepare_layers.BORDER_MIN_ZOOM[str(layer["filter"][2])])
+        self.assertEqual(drawn, produced)
+
+    def test_alert_layer_is_last_and_uses_known_icons(self):
+        style = load_style()
+        last = style["layers"][-1]
+        self.assertEqual(last["id"], "alerts")
+        self.assertEqual(last["source"], "alerts")
+        self.assertEqual(style["sources"]["alerts"]["type"], "geojson")
+        self.assertEqual(last["layout"]["icon-image"], ["get", "type"])
+        kotlin = (ROOT / "android" / "app" / "src" / "main" / "java" / "com" / "dztrafic" / "carte" / "Alert.kt").read_text(encoding="utf-8")
+        for icon in ("route", "accident", "danger"):
+            self.assertIn(f'"{icon}"', kotlin)
+
+    def test_place_label_sizes_follow_importance(self):
+        style = load_style()
+        places = next(layer for layer in style["layers"] if layer["id"] == "places")
+        sizes = dict(zip(places["layout"]["text-size"][2::2], places["layout"]["text-size"][3::2]))
+        self.assertGreaterEqual(sizes["city"], sizes["town"])
+        self.assertGreaterEqual(sizes["town"], sizes["village"])
+        self.assertGreaterEqual(sizes["village"], sizes["hamlet"])
+        self.assertGreaterEqual(min(sizes.values()), 10)
+
+    def test_larger_places_win_label_collisions(self):
+        style = load_style()
+        places = next(layer for layer in style["layers"] if layer["id"] == "places")
+        key = places["layout"]["symbol-sort-key"]
+        self.assertEqual(key[0], "-")
+        self.assertIn("population", json.dumps(key))
 
     def test_zoom_ranges_are_ordered(self):
         style = load_style()

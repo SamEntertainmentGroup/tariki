@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 EXPECTED_LAYERS = ("roads", "places")
+OPTIONAL_LAYERS = ("borders", "coast")
 
 
 def mib(size):
@@ -36,12 +37,15 @@ def inspect(path):
     if missing:
         problems.append("couches absentes : " + ", ".join(missing))
 
+    absent_optional = [layer for layer in OPTIONAL_LAYERS if layer not in layers]
+
     lines = [
         "=== RAPPORT DE LA CARTE ===",
         f"Fichier : {path.name} ({path.stat().st_size:,} octets, {mib(path.stat().st_size)})",
         f"Format : {metadata.get('format', '?')} | zooms {metadata.get('minzoom', '?')} à {metadata.get('maxzoom', '?')}",
         f"Zone : {metadata.get('bounds', '?')}",
         f"Couches : {', '.join(layers) or 'aucune'}",
+        f"Couches facultatives absentes : {', '.join(absent_optional) or 'aucune'}",
         "Tuiles par niveau de zoom (nombre, poids) :",
         *(f"  zoom {zoom:>2} : {count:>9,} tuiles, {mib(size or 0)}" for zoom, count, size in per_zoom),
     ]
