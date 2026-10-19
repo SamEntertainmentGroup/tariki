@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - name: Checkout repository
@@ -17,13 +17,27 @@ jobs:
       - name: Run self-tests
         run: python3 -m unittest discover -s tests -v
 
+      - name: Check alerts server URL
+        env:
+          ALERTS_URL: ${{ vars.ALERTS_URL }}
+        run: |
+          if [ -z "$ALERTS_URL" ]; then
+            echo "La variable ALERTS_URL n'est pas définie (Settings > Secrets and variables > Actions > Variables)."
+            exit 1
+          fi
+          case "$ALERTS_URL" in
+            https://*) ;;
+            *) echo "ALERTS_URL doit commencer par https://"; exit 1 ;;
+          esac
+
       - name: Download map from release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p android/app/src/main/assets
           gh release download map-latest --repo "$GITHUB_REPOSITORY" \
-            --pattern algeria-map.mbtiles --dir android/app/src/main/assets
+            --pattern algeria-map.mbtiles --pattern places-index.json \
+            --dir android/app/src/main/assets
           ls -l android/app/src/main/assets
 
       - name: Check map file
@@ -50,13 +64,15 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: gradle assembleDebug --no-daemon --stacktrace
+        env:
+          ALERTS_URL: ${{ vars.ALERTS_URL }}
+        run: gradle assembleDebug --no-daemon --stacktrace -PalertsUrl="$ALERTS_URL"
 
       - name: Check APK content
         run: |
           APK=android/app/build/outputs/apk/debug/app-debug.apk
           ls -l "$APK"
-          for entry in assets/style.json assets/algeria-map.mbtiles assets/glyphs/NotoSans-Regular/0-255.pbf; do
+          for entry in assets/style.json assets/algeria-map.mbtiles assets/places-index.json assets/glyphs/NotoSans-Regular/0-255.pbf; do
             unzip -l "$APK" | grep -q "$entry" || { echo "Manquant dans l'APK : $entry"; exit 1; }
           done
           echo "Contenu de l'APK vérifié"
