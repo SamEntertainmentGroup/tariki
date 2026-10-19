@@ -1,0 +1,20 @@
+PATCH INTERFACE TARIKI — v1.0
+
+Fichiers à remplacer à la racine du dépôt GitHub :
+- android/app/src/main/java/com/dztrafic/carte/MainActivity.kt
+- android/app/src/main/assets/style.json
+- tests/test_style.py
+
+Changements :
+- compteur de vitesse rond ;
+- bouton + de signalement centré en bas ;
+- commandes secondaires regroupées derrière un seul bouton ☰ ;
+- logo TARIKI retiré de la carte ;
+- crédits MapLibre/OpenStreetMap retirés de la carte et accessibles depuis le menu (ⓘ) ;
+- popup de signalement avec boutons orange, espaces plus grands ;
+- popup de confirmation arrondie, titre agrandi, boutons Annuler/Envoyer agrandis ;
+- noms des villes à partir du zoom 13 ; les petites localités à partir du zoom 14.
+
+Après remplacement et commit, lancer uniquement le workflow Build Android APK.
+Ce ZIP est un patch des SOURCES du dépôt, pas un fichier installable directement sur Android.
+La compilation Android complète n'a pas été exécutée ici ; les 53 tests Python du dépôt passent.

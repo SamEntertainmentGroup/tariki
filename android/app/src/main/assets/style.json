@@ -707,9 +707,15 @@
     {
       "id": "places",
       "type": "symbol",
-      "minzoom": 12,
+      "minzoom": 13,
       "source": "algeria",
       "source-layer": "places",
+      "filter": [
+        "any",
+        [">=", ["zoom"], 14],
+        ["==", ["get", "class"], "city"],
+        ["==", ["get", "class"], "town"]
+      ],
       "layout": {
         "text-field": "{{TEXT_FIELD}}",
         "text-font": [

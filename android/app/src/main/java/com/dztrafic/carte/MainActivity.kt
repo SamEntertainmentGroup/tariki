@@ -86,6 +86,8 @@ class MainActivity : Activity() {
     private lateinit var languageButton: Button
     private lateinit var modeButton: Button
     private lateinit var trackingButton: Button
+    private lateinit var controlsPanel: LinearLayout
+    private lateinit var menuToggleButton: Button
     private var map: MapLibreMap? = null
     private var mapUrl = ""
     private var language = LabelLanguage.ARABIC
@@ -167,21 +169,6 @@ class MainActivity : Activity() {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.rgb(238, 243, 239)) }
         root.addView(mapView, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
 
-        val brand = TextView(this).apply {
-            text = "TARIKI  ·  طريقي"
-            textSize = 14f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(20, 64, 48))
-            gravity = Gravity.CENTER
-            background = rounded(Color.WHITE, 18, Color.rgb(225, 233, 229))
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-            elevation = dp(5).toFloat()
-        }
-        root.addView(brand, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.CENTER_HORIZONTAL,
-        ).apply { setMargins(0, dp(10), 0, 0) })
-
         speedTitle = TextView(this).apply {
             text = if (language == LabelLanguage.ARABIC) "السرعة" else "VITESSE"
             textSize = 11f
@@ -205,17 +192,19 @@ class MainActivity : Activity() {
         val speedPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            background = rounded(Color.rgb(17, 59, 45), 18, Color.rgb(43, 101, 76))
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            minimumWidth = dp(86)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.rgb(17, 59, 45))
+                setStroke(dp(2), Color.rgb(43, 101, 76))
+            }
+            setPadding(dp(8), dp(8), dp(8), dp(8))
             addView(speedTitle)
             addView(speedText)
             addView(unitText)
             elevation = dp(6).toFloat()
         }
         root.addView(speedPanel, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.START,
+            dp(108), dp(108), Gravity.TOP or Gravity.START,
         ).apply { setMargins(dp(12), dp(12), 0, 0) })
 
         voyant = TextView(this).apply {
@@ -272,18 +261,6 @@ class MainActivity : Activity() {
             Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
         ).apply { setMargins(dp(12), 0, dp(12), dp(100)) })
 
-        val attribution = TextView(this).apply {
-            text = "© OpenStreetMap contributors"
-            textSize = 9f
-            setTextColor(Color.rgb(60, 76, 68))
-            background = rounded(Color.argb(225, 255, 255, 255), 8)
-            setPadding(dp(6), dp(3), dp(6), dp(3))
-        }
-        root.addView(attribution, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
-        ).apply { setMargins(0, 0, 0, dp(4)) })
-
         val reportButton = Button(this).apply {
             text = "+"
             textSize = 38f
@@ -302,8 +279,8 @@ class MainActivity : Activity() {
             contentDescription = "الإبلاغ عن خطر"
             setOnClickListener { onReportClicked() }
         }
-        root.addView(reportButton, FrameLayout.LayoutParams(dp(68), dp(68), Gravity.CENTER_VERTICAL or Gravity.START)
-            .apply { setMargins(dp(14), 0, 0, 0) })
+        root.addView(reportButton, FrameLayout.LayoutParams(dp(68), dp(68), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+            .apply { setMargins(0, 0, 0, dp(28)) })
 
         languageButton = smallButton(language.buttonText) {
             language = if (language == LabelLanguage.ARABIC) LabelLanguage.FRENCH else LabelLanguage.ARABIC
@@ -324,21 +301,46 @@ class MainActivity : Activity() {
             textSize = 24f
             contentDescription = "Recentrer sur ma position"
         }
+        val searchButton = smallButton("⌕") { showSearchDialog() }.apply {
+            textSize = 24f
+            contentDescription = "Rechercher une ville ou une commune"
+        }
+        val creditsButton = smallButton("ⓘ") {
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle(if (language == LabelLanguage.ARABIC) "حول الخريطة" else "À propos de la carte")
+                .setMessage("© OpenStreetMap contributors\nMapLibre")
+                .setPositiveButton(if (language == LabelLanguage.ARABIC) "حسناً" else "OK", null)
+                .show()
+        }.apply { textSize = 20f; contentDescription = "Crédits de la carte" }
 
-        val buttons = LinearLayout(this).apply {
+        controlsPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(dp(5), dp(5), dp(5), dp(5))
-            background = rounded(Color.argb(230, 247, 250, 248), 20, Color.rgb(225, 233, 229))
+            background = rounded(Color.argb(238, 247, 250, 248), 20, Color.rgb(225, 233, 229))
             elevation = dp(7).toFloat()
-            val entries = listOf(recenterButton, trackingButton, modeButton, languageButton)
-            entries.forEach { addView(it, LinearLayout.LayoutParams(dp(62), dp(48)).apply { setMargins(0, 0, 0, dp(5)) }) }
+            val entries = listOf(recenterButton, searchButton, trackingButton, modeButton, languageButton, creditsButton)
+            entries.forEach { addView(it, LinearLayout.LayoutParams(dp(62), dp(46)).apply { setMargins(0, 0, 0, dp(5)) }) }
             getChildAt(childCount - 1)?.let { (it.layoutParams as LinearLayout.LayoutParams).bottomMargin = 0 }
+            visibility = View.GONE
         }
-        root.addView(buttons, FrameLayout.LayoutParams(
+        root.addView(controlsPanel, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.CENTER_VERTICAL or Gravity.END,
-        ).apply { setMargins(0, 0, dp(12), 0) })
+            Gravity.TOP or Gravity.END,
+        ).apply { setMargins(0, dp(62), dp(12), 0) })
+
+        menuToggleButton = smallButton("☰") {
+            val opening = controlsPanel.visibility != View.VISIBLE
+            controlsPanel.visibility = if (opening) View.VISIBLE else View.GONE
+            menuToggleButton.text = if (opening) "×" else "☰"
+            menuToggleButton.contentDescription = if (opening) "Fermer les commandes" else "Ouvrir les commandes"
+        }.apply {
+            textSize = 24f
+            background = rounded(Color.WHITE, 18, Color.rgb(225, 233, 229))
+            contentDescription = "Ouvrir les commandes"
+        }
+        root.addView(menuToggleButton, FrameLayout.LayoutParams(dp(50), dp(50), Gravity.TOP or Gravity.END)
+            .apply { setMargins(0, dp(10), dp(12), 0) })
         return root
     }
 
@@ -464,6 +466,9 @@ class MainActivity : Activity() {
 
     private fun onMapReady(readyMap: MapLibreMap) {
         map = readyMap
+        // Les crédits restent accessibles dans le menu, sans encombrer la carte.
+        readyMap.uiSettings.setAttributionEnabled(false)
+        readyMap.uiSettings.setLogoEnabled(false)
         readyMap.setMinZoomPreference(MIN_ZOOM)
         readyMap.cameraPosition = CameraPosition.Builder()
             .target(LatLng(START_LATITUDE, START_LONGITUDE))
@@ -613,7 +618,7 @@ class MainActivity : Activity() {
             textSize = 13f
             setTextColor(Color.rgb(100, 116, 107))
             gravity = Gravity.CENTER
-            setPadding(0, dp(5), 0, dp(14))
+            setPadding(0, dp(12), 0, dp(22))
         }
         content.addView(title)
         content.addView(subtitle)
@@ -622,8 +627,8 @@ class MainActivity : Activity() {
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = rounded(Color.rgb(246, 249, 247), 14, Color.rgb(226, 233, 228))
-                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = rounded(Color.rgb(255, 109, 0), 16, Color.rgb(230, 89, 0))
+                setPadding(dp(16), dp(15), dp(16), dp(15))
                 val icon = TextView(this@MainActivity).apply {
                     text = AlertTypes.emoji(type)
                     textSize = 25f
@@ -633,11 +638,11 @@ class MainActivity : Activity() {
                     text = alertLabel(type)
                     textSize = 16f
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
-                    setTextColor(Color.rgb(37, 61, 49))
+                    setTextColor(Color.WHITE)
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(12), 0, 0, 0)
                 }
-                addView(icon, LinearLayout.LayoutParams(dp(38), dp(38)))
+                addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)))
                 addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 isClickable = true
                 isFocusable = true
@@ -647,16 +652,17 @@ class MainActivity : Activity() {
                 }
             }
             content.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                .apply { setMargins(0, 0, 0, dp(9)) })
+                .apply { setMargins(0, 0, 0, dp(13)) })
         }
         val cancel = Button(this).apply {
             text = if (language == LabelLanguage.ARABIC) "إلغاء" else "Annuler"
             isAllCaps = false
-            setTextColor(Color.rgb(49, 75, 61))
-            background = rounded(Color.rgb(233, 239, 235), 14)
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            background = rounded(ORANGE, 16)
             setOnClickListener { dialog.dismiss() }
         }
-        content.addView(cancel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+        content.addView(cancel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)))
         dialog = AlertDialog.Builder(this).setView(content).create()
         dialog.setOnShowListener { dialog.window?.setBackgroundDrawableResource(android.R.color.transparent) }
         dialog.show()
@@ -675,18 +681,63 @@ class MainActivity : Activity() {
 
     private fun confirmReport(type: String, latitude: Double, longitude: Double) {
         val arabic = language == LabelLanguage.ARABIC
-        AlertDialog.Builder(this)
-            .setTitle(if (arabic) "تأكيد البلاغ" else "Confirmer le signalement")
-            .setMessage("${AlertTypes.emoji(type)}  ${alertLabel(type)}\n" + if (arabic) {
+        lateinit var dialog: AlertDialog
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(Color.WHITE, 24, Color.rgb(236, 226, 216))
+            setPadding(dp(22), dp(22), dp(22), dp(20))
+        }
+        val title = TextView(this).apply {
+            text = if (arabic) "تأكيد البلاغ" else "Confirmer le signalement"
+            textSize = 23f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(24, 53, 42))
+            gravity = Gravity.CENTER
+        }
+        val message = TextView(this).apply {
+            text = "${AlertTypes.emoji(type)}  ${alertLabel(type)}\n\n" + if (arabic) {
                 "هل تريد إرسال هذا البلاغ إلى السائقين الآخرين؟"
             } else {
                 "Voulez-vous partager ce signalement avec les autres conducteurs ?"
-            })
-            .setPositiveButton(if (arabic) "إرسال البلاغ" else "Envoyer") { _, _ ->
+            }
+            textSize = 16f
+            setTextColor(Color.rgb(60, 76, 68))
+            gravity = Gravity.CENTER
+            setPadding(0, dp(20), 0, dp(24))
+        }
+        content.addView(title)
+        content.addView(message)
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val cancel = Button(this).apply {
+            text = if (arabic) "إلغاء" else "Annuler"
+            isAllCaps = false
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(104, 116, 109), 16)
+            setOnClickListener { dialog.dismiss() }
+        }
+        val send = Button(this).apply {
+            text = if (arabic) "إرسال البلاغ" else "Envoyer"
+            isAllCaps = false
+            textSize = 16f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            background = rounded(ORANGE, 16)
+            setOnClickListener {
+                dialog.dismiss()
                 AlertsRepository.submitReport(type, latitude, longitude)
             }
-            .setNegativeButton(if (arabic) "رجوع" else "Annuler", null)
-            .show()
+        }
+        actions.addView(cancel, LinearLayout.LayoutParams(0, dp(54), 1f).apply { setMargins(0, 0, dp(8), 0) })
+        actions.addView(send, LinearLayout.LayoutParams(0, dp(54), 1f).apply { setMargins(dp(8), 0, 0, 0) })
+        content.addView(actions)
+        dialog = AlertDialog.Builder(this).setView(content).create()
+        dialog.setOnShowListener { dialog.window?.setBackgroundDrawableResource(android.R.color.transparent) }
+        dialog.show()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
 
     private fun showSearchDialog() {
