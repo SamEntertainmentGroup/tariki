@@ -2,14 +2,6 @@ name: Build Algeria offline map
 
 on:
   workflow_dispatch:
-    inputs:
-      zone:
-        description: "Zone à générer (commence par le test sur Alger)"
-        type: choice
-        default: test-alger
-        options:
-          - test-alger
-          - algerie-complete
 
 permissions:
   contents: write
@@ -45,20 +37,9 @@ jobs:
             https://download.geofabrik.de/africa/algeria-latest.osm.pbf
           ls -l work/algeria.osm.pbf
 
-      - name: Select zone
-        run: |
-          if [ "${{ inputs.zone }}" = "test-alger" ]; then
-            osmium extract --overwrite --strategy complete_ways \
-              --bbox 2.85,36.60,3.30,36.85 \
-              --output work/zone.osm.pbf work/algeria.osm.pbf
-          else
-            cp work/algeria.osm.pbf work/zone.osm.pbf
-          fi
-          ls -l work/zone.osm.pbf
-
       - name: Extract roads
         run: |
-          osmium tags-filter --overwrite --output work/roads.osm.pbf work/zone.osm.pbf \
+          osmium tags-filter --overwrite --output work/roads.osm.pbf work/algeria.osm.pbf \
             w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,tertiary_link,unclassified,unclassified_link,residential,residential_link
           osmium export --overwrite --geometry-types=linestring \
             --output-format geojsonseq --output work/roads.geojsonseq work/roads.osm.pbf
@@ -67,7 +48,7 @@ jobs:
 
       - name: Extract place names
         run: |
-          osmium tags-filter --overwrite --output work/places.osm.pbf work/zone.osm.pbf \
+          osmium tags-filter --overwrite --output work/places.osm.pbf work/algeria.osm.pbf \
             n/place=city,town,village,hamlet,suburb
           osmium export --overwrite --geometry-types=point \
             --output-format geojsonseq --output work/places.geojsonseq work/places.osm.pbf
@@ -76,11 +57,11 @@ jobs:
 
       - name: Extract borders and coastline
         run: |
-          osmium tags-filter --overwrite --output work/borders.osm.pbf work/zone.osm.pbf \
+          osmium tags-filter --overwrite --output work/borders.osm.pbf work/algeria.osm.pbf \
             w/boundary=administrative
           osmium export --overwrite --geometry-types=linestring \
             --output-format geojsonseq --output work/borders.geojsonseq work/borders.osm.pbf
-          osmium tags-filter --overwrite --output work/coast.osm.pbf work/zone.osm.pbf \
+          osmium tags-filter --overwrite --output work/coast.osm.pbf work/algeria.osm.pbf \
             w/natural=coastline
           osmium export --overwrite --geometry-types=linestring \
             --output-format geojsonseq --output work/coast.geojsonseq work/coast.osm.pbf
@@ -121,7 +102,6 @@ jobs:
           { echo '```'; cat out/report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish map to release
-        if: inputs.zone == 'algerie-complete'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -134,7 +114,7 @@ jobs:
       - name: Upload map
         uses: actions/upload-artifact@v4
         with:
-          name: algeria-map-${{ inputs.zone }}
+          name: algeria-map
           path: |
             out/algeria-map.mbtiles
             out/places-index.json
