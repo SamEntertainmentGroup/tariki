@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
       - name: Checkout repository
@@ -74,22 +74,44 @@ jobs:
           ls -l work/places.geojsonseq
           head -c 500 work/places.geojsonseq | cat -v
 
+      - name: Extract borders and coastline
+        run: |
+          osmium tags-filter --overwrite --output work/borders.osm.pbf work/zone.osm.pbf \
+            w/boundary=administrative
+          osmium export --overwrite --geometry-types=linestring \
+            --output-format geojsonseq --output work/borders.geojsonseq work/borders.osm.pbf
+          osmium tags-filter --overwrite --output work/coast.osm.pbf work/zone.osm.pbf \
+            w/natural=coastline
+          osmium export --overwrite --geometry-types=linestring \
+            --output-format geojsonseq --output work/coast.geojsonseq work/coast.osm.pbf
+          ls -l work/borders.geojsonseq work/coast.geojsonseq
+
       - name: Prepare layers
         run: |
           python3 tools/prepare_layers.py \
             --roads-in work/roads.geojsonseq --roads-out work/roads.tiles.geojsonseq \
-            --places-in work/places.geojsonseq --places-out work/places.tiles.geojsonseq
+            --places-in work/places.geojsonseq --places-out work/places.tiles.geojsonseq \
+            --borders-in work/borders.geojsonseq --borders-out work/borders.tiles.geojsonseq \
+            --coast-in work/coast.geojsonseq --coast-out work/coast.tiles.geojsonseq
+
+      - name: Build search index
+        run: python3 tools/build_search_index.py --input work/places.geojsonseq --output out/places-index.json
 
       - name: Build vector tiles
         run: |
+          layers=(-L roads:work/roads.tiles.geojsonseq -L places:work/places.tiles.geojsonseq)
+          for name in borders coast; do
+            if [ -s "work/$name.tiles.geojsonseq" ]; then
+              layers+=(-L "$name:work/$name.tiles.geojsonseq")
+            fi
+          done
           ./tippecanoe/tippecanoe --force \
             --output out/algeria-map.mbtiles \
-            --name "Algeria roads and places" \
+            --name "Algeria roads, places and borders" \
             --attribution "© OpenStreetMap contributors" \
             --minimum-zoom=4 --maximum-zoom=14 \
             --no-feature-limit --no-tile-size-limit \
-            -L roads:work/roads.tiles.geojsonseq \
-            -L places:work/places.tiles.geojsonseq
+            "${layers[@]}"
           ls -l out/algeria-map.mbtiles
 
       - name: Inspect result
@@ -107,7 +129,7 @@ jobs:
           gh release create map-latest --repo "$GITHUB_REPOSITORY" \
             --title "Carte Algérie (routes et lieux)" \
             --notes "Générée par le workflow Build Algeria offline map, exécution ${{ github.run_number }}." \
-            out/algeria-map.mbtiles out/report.txt
+            out/algeria-map.mbtiles out/places-index.json out/report.txt
 
       - name: Upload map
         uses: actions/upload-artifact@v4
@@ -115,6 +137,7 @@ jobs:
           name: algeria-map-${{ inputs.zone }}
           path: |
             out/algeria-map.mbtiles
+            out/places-index.json
             out/report.txt
           if-no-files-found: error
           compression-level: 0
