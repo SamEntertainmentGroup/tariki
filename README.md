@@ -34,3 +34,15 @@ L'appli utilise les mêmes actions `admin-ajax.php` que le site (`dztrafic_get_a
 - `tests/` : tests automatiques, lancés à chaque exécution.
 
 © OpenStreetMap contributors (ODbL).
+
+
+## Interface v0.3
+
+- Modern green-and-orange map controls and a prominent report button.
+- GPS speed is shown in a larger card; the small trip time/distance line was removed.
+- Place labels appear from zoom level 12 to reduce clutter at overview zooms.
+- Screen stays awake while Tariki is open.
+- Report categories use a custom dialog with a separate confirmation step.
+- The search control is temporarily hidden until route calculation is implemented; this version does not calculate itineraries yet.
+
+The map-generation and APK workflows are unchanged in this interface update.

@@ -144,6 +144,11 @@ class StyleTest(unittest.TestCase):
         for icon in ("route", "accident", "danger"):
             self.assertIn(f'"{icon}"', kotlin)
 
+    def test_place_names_only_appear_from_zoom_12(self):
+        style = load_style()
+        places = next(layer for layer in style["layers"] if layer["id"] == "places")
+        self.assertEqual(places.get("minzoom"), 12)
+
     def test_place_label_sizes_follow_importance(self):
         style = load_style()
         places = next(layer for layer in style["layers"] if layer["id"] == "places")

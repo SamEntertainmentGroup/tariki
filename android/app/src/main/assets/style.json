@@ -707,6 +707,7 @@
     {
       "id": "places",
       "type": "symbol",
+      "minzoom": 12,
       "source": "algeria",
       "source-layer": "places",
       "layout": {
