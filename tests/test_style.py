@@ -144,22 +144,34 @@ class StyleTest(unittest.TestCase):
         for icon in ("route", "accident", "danger"):
             self.assertIn(f'"{icon}"', kotlin)
 
-    def test_place_names_only_appear_from_zoom_13(self):
+    def test_place_names_appear_when_zoomed_out(self):
         style = load_style()
         places = next(layer for layer in style["layers"] if layer["id"] == "places")
-        self.assertEqual(places.get("minzoom"), 13)
-        self.assertIn([">=", ["zoom"], 14], places["filter"])
-        self.assertIn(["==", ["get", "class"], "city"], places["filter"])
-        self.assertIn(["==", ["get", "class"], "town"], places["filter"])
+        self.assertEqual(places.get("minzoom"), 5)
+        filters = json.dumps(places["filter"])
+        self.assertIn('[">=", ["zoom"], 5]', filters)
+        self.assertIn('[">=", ["zoom"], 7]', filters)
+        self.assertIn('[">=", ["zoom"], 9]', filters)
+        self.assertIn('[">=", ["zoom"], 11]', filters)
+        for place_class in ("city", "town", "village", "hamlet", "suburb"):
+            self.assertIn(place_class, filters)
 
     def test_place_label_sizes_follow_importance(self):
         style = load_style()
         places = next(layer for layer in style["layers"] if layer["id"] == "places")
-        sizes = dict(zip(places["layout"]["text-size"][2::2], places["layout"]["text-size"][3::2]))
+        expression = places["layout"]["text-size"]
+        sizes = dict(zip(expression[2::2], expression[3::2]))
         self.assertGreaterEqual(sizes["city"], sizes["town"])
         self.assertGreaterEqual(sizes["town"], sizes["village"])
         self.assertGreaterEqual(sizes["village"], sizes["hamlet"])
         self.assertGreaterEqual(min(sizes.values()), 10)
+
+    def test_background_is_darker_and_rural_roads_have_contrast(self):
+        style = load_style()
+        layers = {layer["id"]: layer for layer in style["layers"]}
+        self.assertEqual(layers["background"]["paint"]["background-color"], "#d6d0c6")
+        self.assertEqual(layers["road-fill-minor"]["paint"]["line-color"], "#ffffff")
+        self.assertEqual(layers["road-casing-minor"]["paint"]["line-color"], "#8c8579")
 
     def test_larger_places_win_label_collisions(self):
         style = load_style()

@@ -20,7 +20,7 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "#f2efe9"
+        "background-color": "#d6d0c6"
       }
     },
     {
@@ -183,7 +183,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#c9c2b4",
+        "line-color": "#8c8579",
         "line-width": [
           "interpolate",
           [
@@ -221,7 +221,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#c9c2b4",
+        "line-color": "#8c8579",
         "line-width": [
           "interpolate",
           [
@@ -707,14 +707,84 @@
     {
       "id": "places",
       "type": "symbol",
-      "minzoom": 13,
+      "minzoom": 5,
       "source": "algeria",
       "source-layer": "places",
       "filter": [
         "any",
-        [">=", ["zoom"], 14],
-        ["==", ["get", "class"], "city"],
-        ["==", ["get", "class"], "town"]
+        [
+          "all",
+          [
+            ">=",
+            [
+              "zoom"
+            ],
+            5
+          ],
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "city"
+          ]
+        ],
+        [
+          "all",
+          [
+            ">=",
+            [
+              "zoom"
+            ],
+            7
+          ],
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "town"
+          ]
+        ],
+        [
+          "all",
+          [
+            ">=",
+            [
+              "zoom"
+            ],
+            9
+          ],
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "village"
+          ]
+        ],
+        [
+          "all",
+          [
+            ">=",
+            [
+              "zoom"
+            ],
+            11
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            "hamlet",
+            "suburb"
+          ]
+        ]
       ],
       "layout": {
         "text-field": "{{TEXT_FIELD}}",
@@ -728,16 +798,16 @@
             "class"
           ],
           "city",
-          18,
+          16,
           "town",
-          15,
+          14,
           "village",
-          13,
+          12,
           "hamlet",
-          11,
+          10,
           "suburb",
-          11,
-          11
+          10,
+          10
         ],
         "text-max-width": 8,
         "text-anchor": "center",
