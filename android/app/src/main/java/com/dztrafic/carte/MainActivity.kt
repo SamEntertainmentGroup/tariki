@@ -39,6 +39,8 @@ import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import java.io.File
 import kotlin.math.roundToInt
@@ -100,6 +102,7 @@ class MainActivity : Activity() {
 
         override fun onGpsState(enabled: Boolean) {
             gpsBanner.visibility = if (enabled) View.GONE else View.VISIBLE
+            updateTrackingButton(TrackerHub.trackingActive)
         }
 
         override fun onTrackingState(active: Boolean) {
@@ -146,14 +149,22 @@ class MainActivity : Activity() {
         setOnClickListener { onClick() }
     }
 
+    private fun isDeviceGpsEnabled(): Boolean = runCatching {
+        (getSystemService(LOCATION_SERVICE) as LocationManager)
+            .isProviderEnabled(LocationManager.GPS_PROVIDER)
+    }.getOrDefault(false)
+
     private fun updateTrackingButton(active: Boolean) {
         if (!::trackingButton.isInitialized) return
-        trackingButton.text = "GPS"
-        trackingButton.setTextColor(if (active) Color.WHITE else Color.rgb(25, 54, 46))
+        val gpsOn = active && isDeviceGpsEnabled() && hasFineLocation()
+        val color = if (gpsOn) Color.rgb(22, 145, 82) else Color.rgb(205, 48, 48)
+        trackingButton.text = if (gpsOn) "⌖" else "⊘"
+        trackingButton.setTextColor(color)
+        trackingButton.contentDescription = if (gpsOn) "GPS actif" else "GPS désactivé — appuyer pour activer"
         trackingButton.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
-            setColor(if (active) Color.rgb(19, 110, 76) else Color.WHITE)
-            setStroke(dp(1), if (active) Color.rgb(19, 110, 76) else Color.rgb(210, 220, 214))
+            setColor(Color.WHITE)
+            setStroke(dp(2), color)
         }
     }
 
@@ -272,11 +283,13 @@ class MainActivity : Activity() {
             languageButton.text = language.buttonText
             gpsBanner.text = if (language == LabelLanguage.ARABIC) "📡 فعّل نظام تحديد الموقع (GPS)" else "📡 Activez la localisation GPS"
             confirmTitle.text = if (language == LabelLanguage.ARABIC) "هل التبليغ صحيح؟" else "Le danger est-il toujours présent ?"
-            reloadStyle()
-        }.apply { contentDescription = "Changer la langue" }
-        trackingButton = smallButton("GPS") { toggleTracking() }.apply {
-            textSize = 12f
-            contentDescription = "Activer ou désactiver le GPS"
+            // Update label expressions in-place: changing language must not reload the map
+            // or move the camera away from the driver's current position.
+            updatePlaceLabels()
+        }.apply { contentDescription = "Changer la langue sans déplacer la carte" }
+        trackingButton = smallButton("⊘") { handleGpsButtonClick() }.apply {
+            textSize = 28f
+            contentDescription = "État du GPS — appuyer pour activer"
         }
         listOf(trackingButton, languageButton).forEach { button ->
             button.background = GradientDrawable().apply {
@@ -313,8 +326,8 @@ class MainActivity : Activity() {
         root.addView(menuButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END)
             .apply { setMargins(0, 0, dp(14), dp(20)) })
 
-        val capButton = smallButton("◎") { recenterAndZoom() }.apply {
-            textSize = 28f
+        val capButton = smallButton("🎯") { recenterAndZoom() }.apply {
+            textSize = 26f
             contentDescription = "Recentrer et zoomer sur ma position"
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -369,6 +382,35 @@ class MainActivity : Activity() {
             addView(confirmTitle)
             addView(row)
         }
+    }
+
+    private fun updatePlaceLabels() {
+        val style = map?.style ?: return
+        val expression = if (language == LabelLanguage.ARABIC) {
+            Expression.coalesce(Expression.get("name_ar"), Expression.get("name"), Expression.get("name_fr"))
+        } else {
+            Expression.coalesce(Expression.get("name_fr"), Expression.get("name"), Expression.get("name_ar"))
+        }
+        listOf("places-city", "places-town", "places-village", "places-suburb", "places-hamlet")
+            .forEach { id -> style.getLayerAs<SymbolLayer>(id)?.setTextField(expression) }
+    }
+
+    private fun handleGpsButtonClick() {
+        if (!hasFineLocation()) {
+            requestPermissionsIfNeeded()
+            return
+        }
+        if (!isDeviceGpsEnabled()) {
+            Toast.makeText(
+                this,
+                if (language == LabelLanguage.ARABIC) "يرجى تفعيل GPS من إعدادات الهاتف" else "Activez le GPS dans les paramètres du téléphone",
+                Toast.LENGTH_LONG,
+            ).show()
+            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            return
+        }
+        if (!TrackerHub.trackingActive) TrackingService.start(this)
+        updateTrackingButton(TrackerHub.trackingActive)
     }
 
     private fun recenterAndZoom() {
@@ -426,17 +468,9 @@ class MainActivity : Activity() {
 
     private fun onLocationReady() {
         map?.style?.let { enableLocation(it) }
-        if (TrackingService.isEnabled(this)) TrackingService.start(this)
-    }
-
-    private fun toggleTracking() {
-        if (TrackerHub.trackingActive) {
-            TrackingService.stop(this)
-        } else if (hasFineLocation()) {
-            TrackingService.start(this)
-        } else {
-            requestPermissionsIfNeeded()
-        }
+        // GPS tracking starts by default; reporting and speed depend on location updates.
+        TrackingService.start(this)
+        updateTrackingButton(TrackerHub.trackingActive)
     }
 
     private fun prepareMapInBackground() {
@@ -559,7 +593,6 @@ class MainActivity : Activity() {
         )
         component.isLocationComponentEnabled = true
         component.renderMode = RenderMode.NORMAL
-        applyTracking()
     }
 
     private fun applyTracking() {
@@ -636,12 +669,12 @@ class MainActivity : Activity() {
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 val icon = TextView(this@MainActivity).apply {
                     text = AlertTypes.emoji(type)
-                    textSize = 25f
+                    textSize = 28f
                     gravity = Gravity.CENTER
                 }
                 val label = TextView(this@MainActivity).apply {
                     text = alertLabel(type)
-                    textSize = 18f
+                    textSize = 19f
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
                     setTextColor(Color.WHITE)
                     gravity = Gravity.CENTER_VERTICAL or Gravity.START
@@ -656,8 +689,8 @@ class MainActivity : Activity() {
                     confirmReport(type, location.latitude, location.longitude)
                 }
             }
-            content.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64))
-                .apply { setMargins(0, dp(4), 0, dp(10)) })
+            content.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(72))
+                .apply { setMargins(0, dp(0), 0, dp(28)) })
         }
         val cancel = Button(this).apply {
             text = if (language == LabelLanguage.ARABIC) "إلغاء" else "Annuler"
@@ -762,6 +795,14 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         mapView.onResume()
+        val gpsEnabled = isDeviceGpsEnabled()
+        if (::gpsBanner.isInitialized) {
+            gpsBanner.visibility = if (gpsEnabled) View.GONE else View.VISIBLE
+        }
+        if (gpsEnabled && hasFineLocation() && !TrackerHub.trackingActive) {
+            TrackingService.start(this)
+        }
+        updateTrackingButton(TrackerHub.trackingActive)
     }
 
     override fun onPause() {
