@@ -6,6 +6,9 @@ on:
 permissions:
   contents: read
 
+env:
+  ALERTS_URL: https://jarti.app/wp-admin/admin-ajax.php
+
 jobs:
   apk:
     runs-on: ubuntu-24.04
@@ -18,13 +21,7 @@ jobs:
         run: python3 -m unittest discover -s tests -v
 
       - name: Check alerts server URL
-        env:
-          ALERTS_URL: ${{ vars.ALERTS_URL }}
         run: |
-          if [ -z "$ALERTS_URL" ]; then
-            echo "La variable ALERTS_URL n'est pas définie (Settings > Secrets and variables > Actions > Variables)."
-            exit 1
-          fi
           case "$ALERTS_URL" in
             https://*) ;;
             *) echo "ALERTS_URL doit commencer par https://"; exit 1 ;;
@@ -64,8 +61,6 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        env:
-          ALERTS_URL: ${{ vars.ALERTS_URL }}
         run: gradle assembleDebug --no-daemon --stacktrace -PalertsUrl="$ALERTS_URL"
 
       - name: Check APK content
