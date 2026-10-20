@@ -75,9 +75,6 @@ jobs:
             --borders-in work/borders.geojsonseq --borders-out work/borders.tiles.geojsonseq \
             --coast-in work/coast.geojsonseq --coast-out work/coast.tiles.geojsonseq
 
-      - name: Build search index
-        run: python3 tools/build_search_index.py --input work/places.geojsonseq --output out/places-index.json
-
       - name: Build vector tiles
         run: |
           layers=(-L roads:work/roads.tiles.geojsonseq -L places:work/places.tiles.geojsonseq)
@@ -109,7 +106,7 @@ jobs:
           gh release create map-latest --repo "$GITHUB_REPOSITORY" \
             --title "Carte Algérie (routes et lieux)" \
             --notes "Générée par le workflow Build Algeria offline map, exécution ${{ github.run_number }}." \
-            out/algeria-map.mbtiles out/places-index.json out/report.txt
+            out/algeria-map.mbtiles out/report.txt
 
       - name: Upload map
         uses: actions/upload-artifact@v4
@@ -117,7 +114,6 @@ jobs:
           name: algeria-map
           path: |
             out/algeria-map.mbtiles
-            out/places-index.json
             out/report.txt
           if-no-files-found: error
           compression-level: 0
