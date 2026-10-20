@@ -20,7 +20,7 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "#d6d0c6"
+        "background-color": "#c2bdb2"
       }
     },
     {
@@ -183,7 +183,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#8c8579",
+        "line-color": "#777064",
         "line-width": [
           "interpolate",
           [
@@ -705,151 +705,233 @@
       }
     },
     {
-      "id": "places",
+      "id": "places-city",
       "type": "symbol",
-      "minzoom": 5,
       "source": "algeria",
       "source-layer": "places",
+      "minzoom": 4,
       "filter": [
-        "any",
+        "==",
         [
-          "all",
-          [
-            ">=",
-            [
-              "zoom"
-            ],
-            5
-          ],
-          [
-            "==",
-            [
-              "get",
-              "class"
-            ],
-            "city"
-          ]
+          "get",
+          "class"
         ],
-        [
-          "all",
-          [
-            ">=",
-            [
-              "zoom"
-            ],
-            7
-          ],
-          [
-            "==",
-            [
-              "get",
-              "class"
-            ],
-            "town"
-          ]
-        ],
-        [
-          "all",
-          [
-            ">=",
-            [
-              "zoom"
-            ],
-            9
-          ],
-          [
-            "==",
-            [
-              "get",
-              "class"
-            ],
-            "village"
-          ]
-        ],
-        [
-          "all",
-          [
-            ">=",
-            [
-              "zoom"
-            ],
-            11
-          ],
-          [
-            "in",
-            [
-              "get",
-              "class"
-            ],
-            "hamlet",
-            "suburb"
-          ]
-        ]
+        "city"
       ],
       "layout": {
         "text-field": "{{TEXT_FIELD}}",
         "text-font": [
           "NotoSans-Regular"
         ],
-        "text-size": [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          "city",
-          16,
-          "town",
-          14,
-          "village",
-          12,
-          "hamlet",
-          10,
-          "suburb",
-          10,
-          10
-        ],
-        "text-max-width": 8,
+        "text-size": 16,
+        "text-max-width": 10,
         "text-anchor": "center",
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
         "symbol-sort-key": [
           "-",
           [
-            "match",
+            "to-number",
             [
-              "get",
-              "class"
-            ],
-            "city",
-            0,
-            "town",
-            1,
-            "village",
-            2,
-            "suburb",
-            3,
-            4
-          ],
-          [
-            "/",
-            [
-              "to-number",
+              "coalesce",
               [
-                "coalesce",
-                [
-                  "get",
-                  "population"
-                ],
-                0
-              ]
-            ],
-            1000000000
+                "get",
+                "population"
+              ],
+              0
+            ]
           ]
         ]
       },
       "paint": {
-        "text-color": "#2b2b2b",
+        "text-color": "#202020",
         "text-halo-color": "#ffffff",
-        "text-halo-width": 1.6
+        "text-halo-width": 2.0,
+        "text-halo-blur": 0.2
+      }
+    },
+    {
+      "id": "places-town",
+      "type": "symbol",
+      "source": "algeria",
+      "source-layer": "places",
+      "minzoom": 6,
+      "filter": [
+        "==",
+        [
+          "get",
+          "class"
+        ],
+        "town"
+      ],
+      "layout": {
+        "text-field": "{{TEXT_FIELD}}",
+        "text-font": [
+          "NotoSans-Regular"
+        ],
+        "text-size": 14,
+        "text-max-width": 10,
+        "text-anchor": "center",
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-sort-key": [
+          "-",
+          [
+            "to-number",
+            [
+              "coalesce",
+              [
+                "get",
+                "population"
+              ],
+              0
+            ]
+          ]
+        ]
+      },
+      "paint": {
+        "text-color": "#202020",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2.0,
+        "text-halo-blur": 0.2
+      }
+    },
+    {
+      "id": "places-village",
+      "type": "symbol",
+      "source": "algeria",
+      "source-layer": "places",
+      "minzoom": 8,
+      "filter": [
+        "==",
+        [
+          "get",
+          "class"
+        ],
+        "village"
+      ],
+      "layout": {
+        "text-field": "{{TEXT_FIELD}}",
+        "text-font": [
+          "NotoSans-Regular"
+        ],
+        "text-size": 12,
+        "text-max-width": 10,
+        "text-anchor": "center",
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-sort-key": [
+          "-",
+          [
+            "to-number",
+            [
+              "coalesce",
+              [
+                "get",
+                "population"
+              ],
+              0
+            ]
+          ]
+        ]
+      },
+      "paint": {
+        "text-color": "#202020",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2.0,
+        "text-halo-blur": 0.2
+      }
+    },
+    {
+      "id": "places-suburb",
+      "type": "symbol",
+      "source": "algeria",
+      "source-layer": "places",
+      "minzoom": 10,
+      "filter": [
+        "==",
+        [
+          "get",
+          "class"
+        ],
+        "suburb"
+      ],
+      "layout": {
+        "text-field": "{{TEXT_FIELD}}",
+        "text-font": [
+          "NotoSans-Regular"
+        ],
+        "text-size": 11,
+        "text-max-width": 10,
+        "text-anchor": "center",
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-sort-key": [
+          "-",
+          [
+            "to-number",
+            [
+              "coalesce",
+              [
+                "get",
+                "population"
+              ],
+              0
+            ]
+          ]
+        ]
+      },
+      "paint": {
+        "text-color": "#202020",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2.0,
+        "text-halo-blur": 0.2
+      }
+    },
+    {
+      "id": "places-hamlet",
+      "type": "symbol",
+      "source": "algeria",
+      "source-layer": "places",
+      "minzoom": 11,
+      "filter": [
+        "==",
+        [
+          "get",
+          "class"
+        ],
+        "hamlet"
+      ],
+      "layout": {
+        "text-field": "{{TEXT_FIELD}}",
+        "text-font": [
+          "NotoSans-Regular"
+        ],
+        "text-size": 11,
+        "text-max-width": 10,
+        "text-anchor": "center",
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-sort-key": [
+          "-",
+          [
+            "to-number",
+            [
+              "coalesce",
+              [
+                "get",
+                "population"
+              ],
+              0
+            ]
+          ]
+        ]
+      },
+      "paint": {
+        "text-color": "#202020",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2.0,
+        "text-halo-blur": 0.2
       }
     },
     {

@@ -18,18 +18,13 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONArray
@@ -83,12 +78,12 @@ class MainActivity : Activity() {
     private lateinit var voyant: TextView
     private lateinit var confirmBox: LinearLayout
     private lateinit var languageButton: Button
-    private lateinit var modeButton: Button
+    private lateinit var menuButton: Button
+    private lateinit var extraButtons: LinearLayout
     private lateinit var trackingButton: Button
     private var map: MapLibreMap? = null
     private var mapUrl = ""
     private var language = LabelLanguage.ARABIC
-    private var courseUp = true
     private var pendingConfirmation: Alert? = null
 
     private val hideVoyant = Runnable { voyant.visibility = View.GONE }
@@ -269,36 +264,21 @@ class MainActivity : Activity() {
             contentDescription = "الإبلاغ عن خطر"
             setOnClickListener { onReportClicked() }
         }
-        root.addView(reportButton, FrameLayout.LayoutParams(dp(76), dp(76), Gravity.BOTTOM or Gravity.START)
-            .apply { setMargins(dp(16), 0, 0, dp(24)) })
+        root.addView(reportButton, FrameLayout.LayoutParams(dp(78), dp(78), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+            .apply { setMargins(0, 0, 0, dp(12)) })
 
         languageButton = smallButton(language.buttonText) {
             language = if (language == LabelLanguage.ARABIC) LabelLanguage.FRENCH else LabelLanguage.ARABIC
             languageButton.text = language.buttonText
             gpsBanner.text = if (language == LabelLanguage.ARABIC) "📡 فعّل نظام تحديد الموقع (GPS)" else "📡 Activez la localisation GPS"
-            modeButton.contentDescription = modeText()
             confirmTitle.text = if (language == LabelLanguage.ARABIC) "هل التبليغ صحيح؟" else "Le danger est-il toujours présent ?"
             reloadStyle()
         }.apply { contentDescription = "Changer la langue" }
-        modeButton = smallButton("🧭") {
-            courseUp = !courseUp
-            modeButton.contentDescription = modeText()
-            applyTracking()
-        }.apply { textSize = 20f; contentDescription = modeText() }
         trackingButton = smallButton("GPS") { toggleTracking() }.apply {
-            textSize = 10f
-            contentDescription = "Activer ou désactiver le suivi GPS"
+            textSize = 12f
+            contentDescription = "Activer ou désactiver le GPS"
         }
-        val recenterButton = smallButton("◎") { applyTracking() }.apply {
-            textSize = 24f
-            contentDescription = "Recentrer sur ma position"
-        }
-        val searchButton = smallButton("⌕") { showSearchDialog() }.apply {
-            textSize = 24f
-            contentDescription = "Rechercher une ville ou une commune"
-        }
-        val roundButtons = listOf(recenterButton, searchButton, trackingButton, modeButton, languageButton)
-        roundButtons.forEach { button ->
+        listOf(trackingButton, languageButton).forEach { button ->
             button.background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.WHITE)
@@ -307,19 +287,43 @@ class MainActivity : Activity() {
             button.elevation = dp(5).toFloat()
             button.setPadding(dp(2), dp(2), dp(2), dp(2))
         }
-        val buttons = LinearLayout(this).apply {
+        extraButtons = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            roundButtons.forEachIndexed { index, button ->
-                addView(button, LinearLayout.LayoutParams(dp(52), dp(52)).apply {
-                    if (index < roundButtons.lastIndex) bottomMargin = dp(8)
-                })
+            visibility = View.GONE
+            addView(trackingButton, LinearLayout.LayoutParams(dp(52), dp(52)).apply { bottomMargin = dp(8) })
+            addView(languageButton, LinearLayout.LayoutParams(dp(52), dp(52)))
+        }
+        root.addView(extraButtons, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.END,
+        ).apply { setMargins(0, 0, dp(16), dp(96)) })
+
+        menuButton = smallButton("☰") {
+            extraButtons.visibility = if (extraButtons.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }.apply {
+            textSize = 24f
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.WHITE)
+                setStroke(dp(1), Color.rgb(210, 220, 214))
+            }
+            contentDescription = "Ouvrir les commandes"
+        }
+        root.addView(menuButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END)
+            .apply { setMargins(0, 0, dp(14), dp(20)) })
+
+        val capButton = smallButton("◎") { recenterAndZoom() }.apply {
+            textSize = 28f
+            contentDescription = "Recentrer et zoomer sur ma position"
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.WHITE)
+                setStroke(dp(2), Color.rgb(25, 54, 46))
             }
         }
-        root.addView(buttons, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.END,
-        ).apply { setMargins(0, dp(12), dp(12), 0) })
+        root.addView(capButton, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.BOTTOM or Gravity.START)
+            .apply { setMargins(dp(16), 0, 0, dp(20)) })
         return root
     }
 
@@ -367,11 +371,22 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun modeText() = when {
-        language == LabelLanguage.ARABIC && courseUp -> "🧭 اتجاه"
-        language == LabelLanguage.ARABIC -> "🧭 شمال"
-        courseUp -> "🧭 Cap"
-        else -> "🧭 Nord"
+    private fun recenterAndZoom() {
+        val currentMap = map ?: return
+        val location = TrackerHub.lastLocation
+        if (location == null || System.currentTimeMillis() - location.time > MAX_GPS_AGE_MS) {
+            Toast.makeText(
+                this,
+                if (language == LabelLanguage.ARABIC) "انتظر إشارة GPS" else "En attente de la position GPS",
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        val component = currentMap.locationComponent
+        if (component.isLocationComponentActivated) component.cameraMode = CameraMode.TRACKING_GPS
+        currentMap.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(LatLng(location.latitude, location.longitude), TRACKING_ZOOM)
+        )
     }
 
     private fun showStatus(text: String?) {
@@ -539,7 +554,7 @@ class MainActivity : Activity() {
     private fun applyTracking() {
         val component = map?.locationComponent ?: return
         if (!component.isLocationComponentActivated) return
-        component.cameraMode = if (courseUp) CameraMode.TRACKING_GPS else CameraMode.TRACKING_GPS_NORTH
+        component.cameraMode = CameraMode.TRACKING_GPS
         component.zoomWhileTracking(TRACKING_ZOOM)
     }
 
@@ -597,32 +612,32 @@ class MainActivity : Activity() {
             textSize = 14f
             setTextColor(Color.rgb(100, 116, 107))
             gravity = Gravity.CENTER
-            setPadding(dp(4), dp(12), dp(4), dp(26))
+            setPadding(dp(4), dp(14), dp(4), dp(24))
         }
         content.addView(title)
         content.addView(subtitle)
 
         AlertTypes.all.forEach { type ->
             val item = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
                 background = rounded(ORANGE, 16, Color.rgb(230, 89, 0))
-                setPadding(dp(10), dp(8), dp(10), dp(8))
+                setPadding(dp(14), dp(8), dp(14), dp(8))
                 val icon = TextView(this@MainActivity).apply {
                     text = AlertTypes.emoji(type)
-                    textSize = 27f
+                    textSize = 25f
                     gravity = Gravity.CENTER
                 }
                 val label = TextView(this@MainActivity).apply {
                     text = alertLabel(type)
-                    textSize = 17f
+                    textSize = 18f
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
                     setTextColor(Color.WHITE)
-                    gravity = Gravity.CENTER
-                    setPadding(0, dp(2), 0, 0)
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                    setPadding(dp(12), 0, 0, 0)
                 }
-                addView(icon, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(32)))
-                addView(label, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                addView(icon, LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT))
+                addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
@@ -630,8 +645,8 @@ class MainActivity : Activity() {
                     confirmReport(type, location.latitude, location.longitude)
                 }
             }
-            content.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(82))
-                .apply { setMargins(0, 0, 0, dp(12)) })
+            content.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64))
+                .apply { setMargins(0, dp(4), 0, dp(10)) })
         }
         val cancel = Button(this).apply {
             text = if (language == LabelLanguage.ARABIC) "إلغاء" else "Annuler"
@@ -719,57 +734,6 @@ class MainActivity : Activity() {
         dialog.setOnShowListener { dialog.window?.setBackgroundDrawableResource(android.R.color.transparent) }
         dialog.show()
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-    }
-
-    private fun showSearchDialog() {
-        val input = EditText(this).apply {
-            hint = "ابحث عن مدينة أو بلدية — Rechercher"
-            setSingleLine()
-        }
-        val resultsAdapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, mutableListOf())
-        val list = ListView(this)
-        list.adapter = resultsAdapter
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), 0)
-            addView(input)
-            addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300)))
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("🔍")
-            .setView(container)
-            .setNegativeButton("إغلاق", null)
-            .create()
-
-        var results = emptyList<PlacePoint>()
-        input.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) {}
-
-            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {}
-
-            override fun afterTextChanged(text: Editable?) {
-                results = PlaceSearch.search(text?.toString().orEmpty())
-                resultsAdapter.clear()
-                resultsAdapter.addAll(results.map { it.display })
-                if (results.isEmpty() && !text.isNullOrEmpty() && !PlaceSearch.isLoaded) {
-                    resultsAdapter.add("فهرس الأماكن غير متوفر")
-                }
-            }
-        })
-        list.setOnItemClickListener { _, _, position, _ ->
-            results.getOrNull(position)?.let { goTo(it) }
-            dialog.dismiss()
-        }
-        dialog.show()
-    }
-
-    private fun goTo(place: PlacePoint) {
-        val currentMap = map ?: return
-        val component = currentMap.locationComponent
-        if (component.isLocationComponentActivated) component.cameraMode = CameraMode.NONE
-        currentMap.animateCamera(
-            CameraUpdateFactory.newLatLngZoom(LatLng(place.latitude, place.longitude), SEARCH_ZOOM)
-        )
     }
 
     override fun onStart() {

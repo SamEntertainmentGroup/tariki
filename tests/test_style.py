@@ -42,15 +42,17 @@ class StyleTest(unittest.TestCase):
     def test_template_placeholders_are_present_once(self):
         raw = STYLE_PATH.read_text(encoding="utf-8")
         self.assertEqual(raw.count("{{MBTILES_URL}}"), 1)
-        self.assertEqual(raw.count('"{{TEXT_FIELD}}"'), 1)
+        self.assertEqual(raw.count('"{{TEXT_FIELD}}"'), 5)
         json.loads(raw)
 
     def test_both_languages_produce_valid_json(self):
         for text_field in (TEXT_FIELD_ARABIC, TEXT_FIELD_FRENCH):
             style = load_style(text_field)
-            places = next(layer for layer in style["layers"] if layer["id"] == "places")
-            self.assertIsInstance(places["layout"]["text-field"], list)
-            self.assertEqual(places["layout"]["text-field"][0], "coalesce")
+            places = [layer for layer in style["layers"] if layer["id"].startswith("places-")]
+            self.assertEqual(len(places), 5)
+            for layer in places:
+                self.assertIsInstance(layer["layout"]["text-field"], list)
+                self.assertEqual(layer["layout"]["text-field"][0], "coalesce")
 
     def test_source_is_a_local_vector_source(self):
         style = load_style()
@@ -146,21 +148,20 @@ class StyleTest(unittest.TestCase):
 
     def test_place_names_appear_when_zoomed_out(self):
         style = load_style()
-        places = next(layer for layer in style["layers"] if layer["id"] == "places")
-        self.assertEqual(places.get("minzoom"), 5)
-        filters = json.dumps(places["filter"])
-        self.assertIn('[">=", ["zoom"], 5]', filters)
-        self.assertIn('[">=", ["zoom"], 7]', filters)
-        self.assertIn('[">=", ["zoom"], 9]', filters)
-        self.assertIn('[">=", ["zoom"], 11]', filters)
-        for place_class in ("city", "town", "village", "hamlet", "suburb"):
-            self.assertIn(place_class, filters)
+        places = {layer["id"]: layer for layer in style["layers"] if layer["id"].startswith("places-")}
+        self.assertEqual(set(places), {"places-city", "places-town", "places-village", "places-hamlet", "places-suburb"})
+        self.assertEqual(places["places-city"]["minzoom"], 4)
+        self.assertEqual(places["places-town"]["minzoom"], 6)
+        self.assertEqual(places["places-village"]["minzoom"], 8)
+        self.assertEqual(places["places-suburb"]["minzoom"], 10)
+        self.assertEqual(places["places-hamlet"]["minzoom"], 11)
+        for cls, layer in places.items():
+            self.assertEqual(layer["filter"], ["==", ["get", "class"], cls.removeprefix("places-")])
 
     def test_place_label_sizes_follow_importance(self):
         style = load_style()
-        places = next(layer for layer in style["layers"] if layer["id"] == "places")
-        expression = places["layout"]["text-size"]
-        sizes = dict(zip(expression[2::2], expression[3::2]))
+        places = {layer["id"]: layer for layer in style["layers"] if layer["id"].startswith("places-")}
+        sizes = {key.removeprefix("places-"): layer["layout"]["text-size"] for key, layer in places.items()}
         self.assertGreaterEqual(sizes["city"], sizes["town"])
         self.assertGreaterEqual(sizes["town"], sizes["village"])
         self.assertGreaterEqual(sizes["village"], sizes["hamlet"])
@@ -169,16 +170,18 @@ class StyleTest(unittest.TestCase):
     def test_background_is_darker_and_rural_roads_have_contrast(self):
         style = load_style()
         layers = {layer["id"]: layer for layer in style["layers"]}
-        self.assertEqual(layers["background"]["paint"]["background-color"], "#d6d0c6")
+        self.assertEqual(layers["background"]["paint"]["background-color"], "#c2bdb2")
         self.assertEqual(layers["road-fill-minor"]["paint"]["line-color"], "#ffffff")
-        self.assertEqual(layers["road-casing-minor"]["paint"]["line-color"], "#8c8579")
+        self.assertEqual(layers["road-casing-minor"]["paint"]["line-color"], "#777064")
 
     def test_larger_places_win_label_collisions(self):
         style = load_style()
-        places = next(layer for layer in style["layers"] if layer["id"] == "places")
-        key = places["layout"]["symbol-sort-key"]
-        self.assertEqual(key[0], "-")
-        self.assertIn("population", json.dumps(key))
+        places = [layer for layer in style["layers"] if layer["id"].startswith("places-")]
+        self.assertEqual(len(places), 5)
+        for layer in places:
+            key = layer["layout"]["symbol-sort-key"]
+            self.assertEqual(key[0], "-")
+            self.assertIn("population", json.dumps(key))
 
     def test_zoom_ranges_are_ordered(self):
         style = load_style()
