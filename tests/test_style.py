@@ -151,10 +151,10 @@ class StyleTest(unittest.TestCase):
         places = {layer["id"]: layer for layer in style["layers"] if layer["id"].startswith("places-")}
         self.assertEqual(set(places), {"places-city", "places-town", "places-village", "places-hamlet", "places-suburb"})
         self.assertEqual(places["places-city"]["minzoom"], 4)
-        self.assertEqual(places["places-town"]["minzoom"], 8)
-        self.assertEqual(places["places-village"]["minzoom"], 10)
-        self.assertEqual(places["places-suburb"]["minzoom"], 12)
-        self.assertEqual(places["places-hamlet"]["minzoom"], 13)
+        self.assertEqual(places["places-town"]["minzoom"], 9)
+        self.assertEqual(places["places-village"]["minzoom"], 12)
+        self.assertEqual(places["places-suburb"]["minzoom"], 14)
+        self.assertEqual(places["places-hamlet"]["minzoom"], 15)
         for cls, layer in places.items():
             self.assertEqual(layer["filter"], ["==", ["get", "class"], cls.removeprefix("places-")])
 

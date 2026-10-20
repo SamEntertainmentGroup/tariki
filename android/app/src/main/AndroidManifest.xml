@@ -11,7 +11,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Tariki | طريقي"
+        android:label="طريقي"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity

@@ -741,7 +741,8 @@
               0
             ]
           ]
-        ]
+        ],
+        "text-padding": 6
       },
       "paint": {
         "text-color": "#202020",
@@ -755,7 +756,7 @@
       "type": "symbol",
       "source": "algeria",
       "source-layer": "places",
-      "minzoom": 8,
+      "minzoom": 9,
       "filter": [
         "==",
         [
@@ -787,7 +788,8 @@
               0
             ]
           ]
-        ]
+        ],
+        "text-padding": 12
       },
       "paint": {
         "text-color": "#202020",
@@ -801,7 +803,7 @@
       "type": "symbol",
       "source": "algeria",
       "source-layer": "places",
-      "minzoom": 10,
+      "minzoom": 12,
       "filter": [
         "==",
         [
@@ -833,7 +835,8 @@
               0
             ]
           ]
-        ]
+        ],
+        "text-padding": 12
       },
       "paint": {
         "text-color": "#202020",
@@ -847,7 +850,7 @@
       "type": "symbol",
       "source": "algeria",
       "source-layer": "places",
-      "minzoom": 12,
+      "minzoom": 14,
       "filter": [
         "==",
         [
@@ -879,7 +882,8 @@
               0
             ]
           ]
-        ]
+        ],
+        "text-padding": 12
       },
       "paint": {
         "text-color": "#202020",
@@ -893,7 +897,7 @@
       "type": "symbol",
       "source": "algeria",
       "source-layer": "places",
-      "minzoom": 13,
+      "minzoom": 15,
       "filter": [
         "==",
         [
@@ -925,7 +929,8 @@
               0
             ]
           ]
-        ]
+        ],
+        "text-padding": 12
       },
       "paint": {
         "text-color": "#202020",

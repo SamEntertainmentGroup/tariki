@@ -8,7 +8,7 @@ Deux workflows GitHub Actions :
 ## Étapes
 
 1. Envoie dans ton dépôt les dossiers `.github`, `tools`, `tests` et `android` (en remplaçant les fichiers existants). Le dossier `.github` est caché : sous Linux, Ctrl+H.
-2. Définis l'adresse du serveur : Settings → Secrets and variables → Actions → onglet **Variables** → New repository variable `ALERTS_URL` = `https://ton-site/wp-admin/admin-ajax.php`.
+2. L'adresse du serveur est fixée dans `.github/workflows/build-apk.yml` (`ALERTS_URL: https://jarti.app/wp-admin/admin-ajax.php`). Modifie cette ligne pour changer de site.
 3. Lance **Build Algeria offline map** : d'abord `test-alger` (contrôle du rapport), puis `algerie-complete` (publie la Release `map-latest`).
 4. Lance **Build Android APK**, télécharge l'artefact `dz-carte-apk`, installe `app-debug.apk`.
 
