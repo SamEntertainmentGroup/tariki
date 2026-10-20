@@ -723,8 +723,8 @@
         "text-font": [
           "NotoSans-Regular"
         ],
-        "text-size": 16,
-        "text-max-width": 10,
+        "text-size": 14,
+        "text-max-width": 9,
         "text-anchor": "center",
         "text-allow-overlap": false,
         "text-ignore-placement": false,
@@ -755,7 +755,7 @@
       "type": "symbol",
       "source": "algeria",
       "source-layer": "places",
-      "minzoom": 6,
+      "minzoom": 8,
       "filter": [
         "==",
         [
@@ -769,7 +769,7 @@
         "text-font": [
           "NotoSans-Regular"
         ],
-        "text-size": 14,
+        "text-size": 13,
         "text-max-width": 10,
         "text-anchor": "center",
         "text-allow-overlap": false,
@@ -801,7 +801,7 @@
       "type": "symbol",
       "source": "algeria",
       "source-layer": "places",
-      "minzoom": 8,
+      "minzoom": 10,
       "filter": [
         "==",
         [
@@ -815,7 +815,7 @@
         "text-font": [
           "NotoSans-Regular"
         ],
-        "text-size": 12,
+        "text-size": 11,
         "text-max-width": 10,
         "text-anchor": "center",
         "text-allow-overlap": false,
@@ -847,7 +847,7 @@
       "type": "symbol",
       "source": "algeria",
       "source-layer": "places",
-      "minzoom": 10,
+      "minzoom": 12,
       "filter": [
         "==",
         [
@@ -893,7 +893,7 @@
       "type": "symbol",
       "source": "algeria",
       "source-layer": "places",
-      "minzoom": 11,
+      "minzoom": 13,
       "filter": [
         "==",
         [

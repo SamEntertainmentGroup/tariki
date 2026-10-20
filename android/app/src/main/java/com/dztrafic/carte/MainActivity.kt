@@ -319,7 +319,7 @@ class MainActivity : Activity() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.WHITE)
-                setStroke(dp(2), Color.rgb(25, 54, 46))
+                // Pas de contour noir autour du bouton de recentrage.
             }
         }
         root.addView(capButton, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.BOTTOM or Gravity.START)
@@ -383,9 +383,20 @@ class MainActivity : Activity() {
             return
         }
         val component = currentMap.locationComponent
-        if (component.isLocationComponentActivated) component.cameraMode = CameraMode.TRACKING_GPS
+        if (component.isLocationComponentActivated) {
+            // Suit la position GPS tout en gardant le nord en haut de la carte.
+            component.cameraMode = CameraMode.TRACKING_GPS_NORTH
+            component.zoomWhileTracking(TRACKING_ZOOM)
+        }
         currentMap.animateCamera(
-            CameraUpdateFactory.newLatLngZoom(LatLng(location.latitude, location.longitude), TRACKING_ZOOM)
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder()
+                    .target(LatLng(location.latitude, location.longitude))
+                    .zoom(TRACKING_ZOOM)
+                    .bearing(0.0)
+                    .tilt(0.0)
+                    .build()
+            )
         )
     }
 
@@ -554,7 +565,7 @@ class MainActivity : Activity() {
     private fun applyTracking() {
         val component = map?.locationComponent ?: return
         if (!component.isLocationComponentActivated) return
-        component.cameraMode = CameraMode.TRACKING_GPS
+        component.cameraMode = CameraMode.TRACKING_GPS_NORTH
         component.zoomWhileTracking(TRACKING_ZOOM)
     }
 

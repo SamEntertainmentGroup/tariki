@@ -151,10 +151,10 @@ class StyleTest(unittest.TestCase):
         places = {layer["id"]: layer for layer in style["layers"] if layer["id"].startswith("places-")}
         self.assertEqual(set(places), {"places-city", "places-town", "places-village", "places-hamlet", "places-suburb"})
         self.assertEqual(places["places-city"]["minzoom"], 4)
-        self.assertEqual(places["places-town"]["minzoom"], 6)
-        self.assertEqual(places["places-village"]["minzoom"], 8)
-        self.assertEqual(places["places-suburb"]["minzoom"], 10)
-        self.assertEqual(places["places-hamlet"]["minzoom"], 11)
+        self.assertEqual(places["places-town"]["minzoom"], 8)
+        self.assertEqual(places["places-village"]["minzoom"], 10)
+        self.assertEqual(places["places-suburb"]["minzoom"], 12)
+        self.assertEqual(places["places-hamlet"]["minzoom"], 13)
         for cls, layer in places.items():
             self.assertEqual(layer["filter"], ["==", ["get", "class"], cls.removeprefix("places-")])
 
@@ -190,6 +190,13 @@ class StyleTest(unittest.TestCase):
             if isinstance(stops, list) and stops[0] == "interpolate":
                 zooms = stops[3::2]
                 self.assertEqual(zooms, sorted(zooms), layer["id"])
+
+    def test_recenter_follows_gps_north_up_without_black_outline(self):
+        kotlin = (ROOT / "android" / "app" / "src" / "main" / "java" / "com" / "dztrafic" / "carte" / "MainActivity.kt").read_text(encoding="utf-8")
+        self.assertGreaterEqual(kotlin.count("CameraMode.TRACKING_GPS_NORTH"), 2)
+        self.assertIn(".bearing(0.0)", kotlin)
+        cap = kotlin.split('val capButton =', 1)[1].split('root.addView(capButton', 1)[0]
+        self.assertNotIn("setStroke", cap)
 
 
 if __name__ == "__main__":
