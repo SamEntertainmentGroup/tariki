@@ -36,7 +36,7 @@ jobs:
         run: |
           mkdir -p android/app/src/main/assets
           gh release download map-latest --repo "$GITHUB_REPOSITORY" \
-            --pattern algeria-map.mbtiles --pattern places-index.json \
+            --pattern algeria-map.mbtiles \
             --dir android/app/src/main/assets
           ls -l android/app/src/main/assets
 
@@ -72,7 +72,7 @@ jobs:
         run: |
           APK=android/app/build/outputs/apk/debug/app-debug.apk
           ls -l "$APK"
-          for entry in assets/style.json assets/algeria-map.mbtiles assets/places-index.json assets/glyphs/NotoSans-Regular/0-255.pbf; do
+          for entry in assets/style.json assets/algeria-map.mbtiles assets/glyphs/NotoSans-Regular/0-255.pbf; do
             unzip -l "$APK" | grep -q "$entry" || { echo "Manquant dans l'APK : $entry"; exit 1; }
           done
           echo "Contenu de l'APK vérifié"
