@@ -1,0 +1,6 @@
+Tariki v8 - archive cleanup and UI source refresh
+
+- Based on the v7 source.
+- Keeps the updated GPS/recenter symbols and 28 dp spacing between report categories.
+- Removes generated Python caches and pytest cache from the ZIP.
+- Python self-tests pass in this environment. Android/Gradle compilation has NOT been verified here.

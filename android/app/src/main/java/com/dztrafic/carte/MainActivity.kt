@@ -158,7 +158,7 @@ class MainActivity : Activity() {
         if (!::trackingButton.isInitialized) return
         val gpsOn = active && isDeviceGpsEnabled() && hasFineLocation()
         val color = if (gpsOn) Color.rgb(22, 145, 82) else Color.rgb(205, 48, 48)
-        trackingButton.text = if (gpsOn) "⌖" else "⊘"
+        trackingButton.text = if (gpsOn) "📡" else "🚫"
         trackingButton.setTextColor(color)
         trackingButton.contentDescription = if (gpsOn) "GPS actif" else "GPS désactivé — appuyer pour activer"
         trackingButton.background = GradientDrawable().apply {
@@ -287,8 +287,8 @@ class MainActivity : Activity() {
             // or move the camera away from the driver's current position.
             updatePlaceLabels()
         }.apply { contentDescription = "Changer la langue sans déplacer la carte" }
-        trackingButton = smallButton("⊘") { handleGpsButtonClick() }.apply {
-            textSize = 28f
+        trackingButton = smallButton("📴") { handleGpsButtonClick() }.apply {
+            textSize = 22f
             contentDescription = "État du GPS — appuyer pour activer"
         }
         listOf(trackingButton, languageButton).forEach { button ->
@@ -326,8 +326,8 @@ class MainActivity : Activity() {
         root.addView(menuButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END)
             .apply { setMargins(0, 0, dp(14), dp(20)) })
 
-        val capButton = smallButton("🎯") { recenterAndZoom() }.apply {
-            textSize = 26f
+        val capButton = smallButton("◎") { recenterAndZoom() }.apply {
+            textSize = 28f
             contentDescription = "Recentrer et zoomer sur ma position"
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
