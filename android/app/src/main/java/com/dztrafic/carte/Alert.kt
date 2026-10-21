@@ -1,5 +1,6 @@
 package com.dztrafic.carte
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class Alert(
@@ -10,6 +11,7 @@ data class Alert(
     val title: String,
     val confirmations: Int,
     val ageSeconds: Long,
+    val comments: List<String> = emptyList(),
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -19,6 +21,7 @@ data class Alert(
         .put("title", title)
         .put("confirmations", confirmations)
         .put("age", ageSeconds)
+        .put("comments", JSONArray(comments))
 
     companion object {
         fun fromJson(json: JSONObject) = Alert(
@@ -29,6 +32,9 @@ data class Alert(
             title = json.optString("title"),
             confirmations = json.optInt("confirmations", 1),
             ageSeconds = json.optLong("age", 0),
+            comments = json.optJSONArray("comments")?.let { array ->
+                (0 until array.length()).map { array.optString(it) }.filter { it.isNotBlank() }
+            } ?: emptyList(),
         )
     }
 }
@@ -38,12 +44,14 @@ data class PendingReport(
     val latitude: Double,
     val longitude: Double,
     val createdAtMs: Long,
+    val comment: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("type", type)
         .put("lat", latitude)
         .put("lng", longitude)
         .put("createdAt", createdAtMs)
+        .put("comment", comment)
 
     companion object {
         fun fromJson(json: JSONObject) = PendingReport(
@@ -51,6 +59,7 @@ data class PendingReport(
             latitude = json.getDouble("lat"),
             longitude = json.getDouble("lng"),
             createdAtMs = json.optLong("createdAt", 0),
+            comment = json.optString("comment"),
         )
     }
 }

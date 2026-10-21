@@ -30,6 +30,7 @@ class AlertsApi(private val endpoint: String) {
             "type" to report.type,
             "latitude" to report.latitude.toString(),
             "longitude" to report.longitude.toString(),
+            "comment" to report.comment.trim().take(140),
         )
         return toResult(request("POST", "", form))
     }

@@ -3,6 +3,7 @@ package com.dztrafic.carte
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -13,18 +14,23 @@ import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.location.Location
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.InputFilter
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.ScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -69,6 +75,10 @@ private const val COPY_BUFFER_BYTES = 1 shl 16
 private const val MAX_GPS_AGE_MS = 300_000L
 private const val VOYANT_MS = 5_000L
 private const val CONFIRM_MS = 10_000L
+private const val POPUP_AUTO_CLOSE_MS = 30_000L
+private const val STATUS_TICK_MS = 2_000L
+private const val SEARCH_STALE_MS = 20_000L
+private const val COMMENT_MAX_LENGTH = 140
 private const val ALERT_ICON_DP = 48
 private const val TAP_RADIUS_DP = 30
 private const val ORANGE = 0xFFFF6D00.toInt()
@@ -78,8 +88,11 @@ private enum class LabelLanguage(val buttonText: String, val expression: String)
     FRENCH("FR", """["coalesce",["get","name_fr"],["get","name"],["get","name_ar"]]"""),
 }
 
+private enum class SystemState { OK, NO_GPS, NO_NOTIFICATIONS, SEARCHING }
+
 private class AlertGroup(val latitude: Double, val longitude: Double) {
     val counts = LinkedHashMap<String, Int>()
+    val comments = LinkedHashSet<String>()
     var total = 0
 
     fun add(alert: Alert) {
@@ -87,6 +100,7 @@ private class AlertGroup(val latitude: Double, val longitude: Double) {
         val weight = alert.confirmations.coerceAtLeast(1)
         counts[type] = (counts[type] ?: 0) + weight
         total += weight
+        alert.comments.forEach { if (it.isNotBlank() && comments.size < 5) comments.add(it) }
     }
 }
 
@@ -110,10 +124,19 @@ class MainActivity : Activity() {
     private var followLocation = true
     private var positioned = false
     private var mapBearing = 0.0
+    private var systemState = SystemState.OK
+    private var askedLocation = false
+    private var askedNotifications = false
 
     private val hideVoyant = Runnable { voyant.visibility = View.GONE }
     private val hideConfirmation = Runnable { closeConfirmation() }
     private val recenter = Runnable { resumeFollowing() }
+    private val statusTick = object : Runnable {
+        override fun run() {
+            refreshGpsBanner()
+            handler.postDelayed(this, STATUS_TICK_MS)
+        }
+    }
 
     private val tracker = object : TrackerListener {
         override fun onLocation(location: Location) = showLocation(location)
@@ -125,7 +148,7 @@ class MainActivity : Activity() {
         override fun onConfirmationRequest(alert: Alert) = showConfirmation(alert)
 
         override fun onGpsState(enabled: Boolean) {
-            gpsBanner.visibility = if (enabled && hasFineLocation()) View.GONE else View.VISIBLE
+            refreshGpsBanner()
         }
 
         override fun onMessage(text: String) {
@@ -173,13 +196,82 @@ class MainActivity : Activity() {
             .isProviderEnabled(LocationManager.GPS_PROVIDER)
     }.getOrDefault(false)
 
-    private fun gpsBannerText(): String =
-        if (language == LabelLanguage.ARABIC) "فعّل نظام تحديد الموقع (GPS) 📡" else "📡 Activez la localisation (GPS)"
+    private fun notificationsEnabled(): Boolean = runCatching {
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).areNotificationsEnabled()
+    }.getOrDefault(true)
 
+    private fun hasFreshFix(): Boolean {
+        val location = TrackerHub.lastLocation ?: return false
+        return System.currentTimeMillis() - location.time <= SEARCH_STALE_MS
+    }
+
+    /** Message d'état en haut : rouge si le GPS ou les notifications manquent (obligatoires), bleu pendant la recherche du signal. */
     private fun refreshGpsBanner() {
         if (!::gpsBanner.isInitialized) return
-        val ready = isDeviceGpsEnabled() && hasFineLocation()
-        gpsBanner.visibility = if (ready) View.GONE else View.VISIBLE
+        val arabic = language == LabelLanguage.ARABIC
+        systemState = when {
+            !hasFineLocation() || !isDeviceGpsEnabled() -> SystemState.NO_GPS
+            !notificationsEnabled() -> SystemState.NO_NOTIFICATIONS
+            !hasFreshFix() -> SystemState.SEARCHING
+            else -> SystemState.OK
+        }
+        val red = Color.rgb(183, 43, 39)
+        val blue = Color.rgb(0, 108, 255)
+        val (text, color) = when (systemState) {
+            SystemState.NO_GPS -> Pair(
+                if (arabic) "فعّل نظام تحديد الموقع (GPS) 📡" else "📡 Activez la localisation (GPS)", red,
+            )
+            SystemState.NO_NOTIFICATIONS -> Pair(
+                if (arabic) "فعّل الإشعارات 🔔" else "🔔 Activez les notifications", red,
+            )
+            SystemState.SEARCHING -> Pair(
+                if (arabic) "جارٍ البحث عن إشارة GPS... 📡" else "📡 Recherche du signal GPS…", blue,
+            )
+            SystemState.OK -> {
+                gpsBanner.visibility = View.GONE
+                return
+            }
+        }
+        gpsBanner.text = text
+        gpsBanner.background = rounded(color, 16)
+        gpsBanner.visibility = View.VISIBLE
+    }
+
+    private fun openAppSettings() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+    }
+
+    private fun fixNotifications() {
+        val needsRuntime = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if (needsRuntime && (!askedNotifications ||
+                shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))
+        ) {
+            askedNotifications = true
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), PERMISSION_REQUEST)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
+            )
+        } else {
+            openAppSettings()
+        }
+    }
+
+    private fun handleStatusTap() {
+        when (systemState) {
+            SystemState.NO_GPS -> {
+                if (hasFineLocation()) {
+                    startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                } else if (!askedLocation || shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                    requestPermissionsIfNeeded()
+                } else {
+                    openAppSettings()
+                }
+            }
+            SystemState.NO_NOTIFICATIONS -> fixNotifications()
+            else -> Unit
+        }
     }
 
     private fun buildLayout(): View {
@@ -236,27 +328,19 @@ class MainActivity : Activity() {
             .apply { setMargins(0, dp(12), dp(12), 0) })
 
         gpsBanner = TextView(this).apply {
-            text = gpsBannerText()
-            textSize = 18f
+            textSize = 20f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
-            background = rounded(Color.rgb(183, 43, 39), 14)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            maxWidth = resources.displayMetrics.widthPixels - dp(12 + 84 + 10 + 12)
+            gravity = Gravity.CENTER
+            setPadding(dp(18), dp(16), dp(18), dp(16))
             elevation = dp(5).toFloat()
             visibility = View.GONE
-            setOnClickListener {
-                if (!hasFineLocation()) {
-                    requestPermissionsIfNeeded()
-                } else {
-                    startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                }
-            }
+            setOnClickListener { handleStatusTap() }
         }
         root.addView(gpsBanner, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.END,
-        ).apply { setMargins(0, dp(12), dp(12), 0) })
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+        ).apply { setMargins(dp(12), dp(110), dp(12), 0) })
 
         status = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -302,8 +386,8 @@ class MainActivity : Activity() {
         languageButton = smallButton(language.buttonText) {
             language = if (language == LabelLanguage.ARABIC) LabelLanguage.FRENCH else LabelLanguage.ARABIC
             languageButton.text = language.buttonText
-            gpsBanner.text = gpsBannerText()
-            confirmTitle.text = if (language == LabelLanguage.ARABIC) "هل التبليغ صحيح؟" else "Le danger est-il toujours présent ?"
+            refreshGpsBanner()
+            confirmTitle.text = if (language == LabelLanguage.ARABIC) "هل التبليغ صحيح؟" else "Ce signalement est-il exact ?"
             // Update label expressions in-place: changing language must not reload the map
             // or move the camera away from the driver's current position.
             updatePlaceLabels()
@@ -358,49 +442,41 @@ class MainActivity : Activity() {
         return root
     }
 
+    private fun answerButton(label: String, color: Int, onClick: () -> Unit) = TextView(this).apply {
+        text = label
+        textSize = 21f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        setTextColor(Color.WHITE)
+        gravity = Gravity.CENTER
+        background = rounded(color, 16)
+        isClickable = true
+        setOnClickListener { onClick() }
+    }
+
     private fun buildConfirmBox(): LinearLayout {
         confirmTitle = TextView(this).apply {
-            text = if (language == LabelLanguage.ARABIC) "هل التبليغ صحيح؟" else "Le danger est-il toujours présent ?"
+            text = if (language == LabelLanguage.ARABIC) "هل التبليغ صحيح؟" else "Ce signalement est-il exact ?"
             textSize = 21f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(Color.rgb(24, 53, 42))
             gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(4))
         }
-        val yes = Button(this).apply {
-            text = "👍 نعم"
-            setTextColor(Color.WHITE)
-            background = rounded(Color.rgb(22, 125, 79), 14)
-            textSize = 20f
-            isAllCaps = false
-            minWidth = 0
-            minHeight = 0
-            setPadding(dp(8), 0, dp(8), 0)
-            setOnClickListener {
-                pendingConfirmation?.let { AlertsRepository.confirm(it.id) }
-                closeConfirmation()
-            }
+        val yes = answerButton("👍 نعم", Color.rgb(22, 125, 79)) {
+            pendingConfirmation?.let { AlertsRepository.confirm(it.id) }
+            closeConfirmation()
         }
-        val no = Button(this).apply {
-            text = "👎 لا"
-            setTextColor(Color.WHITE)
-            background = rounded(Color.rgb(184, 52, 47), 14)
-            textSize = 20f
-            isAllCaps = false
-            minWidth = 0
-            minHeight = 0
-            setPadding(dp(8), 0, dp(8), 0)
-            setOnClickListener { closeConfirmation() }
-        }
+        val no = answerButton("👎 لا", Color.rgb(184, 52, 47)) { closeConfirmation() }
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            addView(yes, LinearLayout.LayoutParams(0, dp(62), 1f).apply { setMargins(dp(6), dp(14), dp(6), 0) })
-            addView(no, LinearLayout.LayoutParams(0, dp(62), 1f).apply { setMargins(dp(6), dp(14), dp(6), 0) })
+            addView(yes, LinearLayout.LayoutParams(0, dp(68), 1f).apply { setMargins(dp(6), dp(22), dp(6), 0) })
+            addView(no, LinearLayout.LayoutParams(0, dp(68), 1f).apply { setMargins(dp(6), dp(22), dp(6), 0) })
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(Color.WHITE, 20, Color.rgb(226, 233, 228))
-            setPadding(dp(20), dp(18), dp(20), dp(18))
+            setPadding(dp(20), dp(22), dp(20), dp(28))
             elevation = dp(10).toFloat()
             visibility = View.GONE
             addView(confirmTitle)
@@ -483,11 +559,15 @@ class MainActivity : Activity() {
 
     private fun requestPermissionsIfNeeded() {
         val missing = mutableListOf<String>()
-        if (!hasFineLocation()) missing += Manifest.permission.ACCESS_FINE_LOCATION
+        if (!hasFineLocation()) {
+            missing += Manifest.permission.ACCESS_FINE_LOCATION
+            askedLocation = true
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             missing += Manifest.permission.POST_NOTIFICATIONS
+            askedNotifications = true
         }
         if (missing.isEmpty()) onLocationReady() else requestPermissions(missing.toTypedArray(), PERMISSION_REQUEST)
     }
@@ -584,7 +664,7 @@ class MainActivity : Activity() {
         disk(center - dp(1) - whiteRing, ORANGE)
         disk(center - dp(1) - whiteRing - orangeRing, Color.WHITE)
         val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = size * 0.46f
+            textSize = size * 0.30f
             textAlign = Paint.Align.CENTER
         }
         canvas.drawText(emoji, center, center - (glyph.descent() + glyph.ascent()) / 2, glyph)
@@ -605,6 +685,7 @@ class MainActivity : Activity() {
             val properties = JSONObject()
                 .put("icon", if (group.counts.size == 1) group.counts.keys.first() else MIXED_ICON)
                 .put("total", group.total)
+                .put("comments", group.comments.joinToString("\n"))
             AlertTypes.all.forEach { properties.put(it, group.counts[it] ?: 0) }
             features.put(
                 JSONObject()
@@ -630,7 +711,8 @@ class MainActivity : Activity() {
         if (single != null) {
             val counts = AlertTypes.all.associateWith { single.getNumberProperty(it)?.toInt() ?: 0 }
             val total = single.getNumberProperty("total")?.toInt() ?: counts.values.sum()
-            showGroupPopup(total, counts)
+            val comments = single.getStringProperty("comments").orEmpty().split("\n").filter { it.isNotBlank() }
+            showGroupPopup(total, counts, comments)
             return true
         }
         // Un cluster : on zoome pour séparer les icônes.
@@ -641,7 +723,7 @@ class MainActivity : Activity() {
         return true
     }
 
-    private fun showGroupPopup(total: Int, counts: Map<String, Int>) {
+    private fun showGroupPopup(total: Int, counts: Map<String, Int>, comments: List<String>) {
         val arabic = language == LabelLanguage.ARABIC
         lateinit var dialog: AlertDialog
         val content = LinearLayout(this).apply {
@@ -668,6 +750,16 @@ class MainActivity : Activity() {
                 })
             }
         }
+        comments.take(5).forEach { comment ->
+            content.addView(TextView(this).apply {
+                text = "💬  $comment"
+                textSize = 15f
+                typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.ITALIC)
+                setTextColor(Color.rgb(88, 102, 95))
+                gravity = Gravity.CENTER
+                setPadding(0, dp(12), 0, 0)
+            })
+        }
         val close = Button(this).apply {
             text = if (arabic) "إغلاق" else "Fermer"
             isAllCaps = false
@@ -679,10 +771,15 @@ class MainActivity : Activity() {
         content.addView(close, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)).apply {
             topMargin = dp(20)
         })
-        dialog = AlertDialog.Builder(this).setView(content).create()
+        val scroll = ScrollView(this).apply { addView(content) }
+        dialog = AlertDialog.Builder(this).setView(scroll).create()
+        // Se ferme automatiquement après 30 secondes.
+        val autoClose = Runnable { if (dialog.isShowing) dialog.dismiss() }
+        dialog.setOnDismissListener { handler.removeCallbacks(autoClose) }
         dialog.setOnShowListener { dialog.window?.setBackgroundDrawableResource(android.R.color.transparent) }
         dialog.show()
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        handler.postDelayed(autoClose, POPUP_AUTO_CLOSE_MS)
     }
 
     private fun enableLocation(style: Style) {
@@ -705,6 +802,7 @@ class MainActivity : Activity() {
             // Premier point GPS : on se place sur la position avec le zoom de conduite.
             if (followCamera(location, resetZoom = !positioned)) positioned = true
         }
+        refreshGpsBanner()
     }
 
     private fun showVoyant() {
@@ -843,10 +941,26 @@ class MainActivity : Activity() {
             textSize = 16f
             setTextColor(Color.rgb(60, 76, 68))
             gravity = Gravity.CENTER
-            setPadding(0, dp(20), 0, dp(24))
+            setPadding(0, dp(20), 0, dp(16))
+        }
+        val commentField = EditText(this).apply {
+            hint = if (arabic) "أضف وصفاً للخطر (اختياري)" else "Décrivez le danger (facultatif)"
+            textSize = 16f
+            setTextColor(Color.rgb(24, 53, 42))
+            setHintTextColor(Color.rgb(140, 152, 146))
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            filters = arrayOf<InputFilter>(InputFilter.LengthFilter(COMMENT_MAX_LENGTH))
+            minLines = 2
+            maxLines = 4
+            gravity = Gravity.TOP or Gravity.START
+            background = rounded(Color.rgb(246, 248, 247), 14, Color.rgb(210, 220, 214))
+            setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         content.addView(title)
         content.addView(message)
+        content.addView(commentField, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(20)
+        })
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -868,13 +982,14 @@ class MainActivity : Activity() {
             background = rounded(ORANGE, 16)
             setOnClickListener {
                 dialog.dismiss()
-                AlertsRepository.submitReport(type, latitude, longitude)
+                AlertsRepository.submitReport(type, latitude, longitude, commentField.text.toString().trim())
             }
         }
         actions.addView(cancel, LinearLayout.LayoutParams(0, dp(54), 1f).apply { setMargins(0, 0, dp(8), 0) })
         actions.addView(send, LinearLayout.LayoutParams(0, dp(54), 1f).apply { setMargins(dp(8), 0, 0, 0) })
         content.addView(actions)
-        dialog = AlertDialog.Builder(this).setView(content).create()
+        dialog = AlertDialog.Builder(this).setView(ScrollView(this).apply { addView(content) }).create()
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dialog.setOnShowListener { dialog.window?.setBackgroundDrawableResource(android.R.color.transparent) }
         dialog.show()
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
@@ -894,13 +1009,15 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         mapView.onResume()
-        refreshGpsBanner()
+        handler.removeCallbacks(statusTick)
+        handler.post(statusTick)
         if (isDeviceGpsEnabled() && hasFineLocation() && !TrackerHub.trackingActive) {
             TrackingService.start(this)
         }
     }
 
     override fun onPause() {
+        handler.removeCallbacks(statusTick)
         mapView.onPause()
         super.onPause()
     }

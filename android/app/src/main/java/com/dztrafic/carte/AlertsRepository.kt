@@ -56,13 +56,13 @@ object AlertsRepository {
         }
     }
 
-    fun submitReport(type: String, latitude: Double, longitude: Double) {
+    fun submitReport(type: String, latitude: Double, longitude: Double, comment: String = "") {
         val storage = store ?: return
         if (api == null) {
             TrackerHub.notifyMessage(TEXT_NOT_CONFIGURED)
             return
         }
-        storage.addPending(PendingReport(type, latitude, longitude, System.currentTimeMillis()))
+        storage.addPending(PendingReport(type, latitude, longitude, System.currentTimeMillis(), comment.trim().take(140)))
         TrackerHub.notifyMessage(TEXT_QUEUED)
         sync()
     }
