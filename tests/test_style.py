@@ -66,7 +66,7 @@ class StyleTest(unittest.TestCase):
         ids = [layer["id"] for layer in style["layers"]]
         self.assertEqual(len(ids), len(set(ids)))
         for layer in style["layers"]:
-            if layer["type"] == "background" or layer["id"] == "alerts":
+            if layer["type"] == "background" or layer.get("source") == "alerts":
                 continue
             self.assertEqual(layer["source"], "algeria")
             self.assertIn(layer["source-layer"], SOURCE_LAYERS)
@@ -141,7 +141,12 @@ class StyleTest(unittest.TestCase):
         self.assertEqual(last["id"], "alerts")
         self.assertEqual(last["source"], "alerts")
         self.assertEqual(style["sources"]["alerts"]["type"], "geojson")
-        self.assertEqual(last["layout"]["icon-image"], ["get", "type"])
+        self.assertEqual(last["layout"]["icon-image"], ["get", "icon"])
+        # Les alertes proches sont regroupées en clusters affichant un nombre.
+        source = style["sources"]["alerts"]
+        self.assertTrue(source["cluster"])
+        cluster_ids = {layer["id"] for layer in style["layers"] if layer.get("source") == "alerts"}
+        self.assertTrue({"alerts-cluster", "alerts-cluster-count", "alerts"} <= cluster_ids)
         kotlin = (ROOT / "android" / "app" / "src" / "main" / "java" / "com" / "dztrafic" / "carte" / "Alert.kt").read_text(encoding="utf-8")
         for icon in ("route", "accident", "danger"):
             self.assertIn(f'"{icon}"', kotlin)
@@ -191,12 +196,21 @@ class StyleTest(unittest.TestCase):
                 zooms = stops[3::2]
                 self.assertEqual(zooms, sorted(zooms), layer["id"])
 
-    def test_recenter_follows_gps_north_up_without_black_outline(self):
+    def test_map_follows_gps_with_heading_up_and_recenters_alone(self):
         kotlin = (ROOT / "android" / "app" / "src" / "main" / "java" / "com" / "dztrafic" / "carte" / "MainActivity.kt").read_text(encoding="utf-8")
-        self.assertGreaterEqual(kotlin.count("CameraMode.TRACKING_GPS_NORTH"), 2)
-        self.assertIn(".bearing(0.0)", kotlin)
-        cap = kotlin.split('val capButton =', 1)[1].split('root.addView(capButton', 1)[0]
-        self.assertNotIn("setStroke", cap)
+        # La carte suit la position et tourne selon le cap ; plus de boussole ni de nord fixe.
+        self.assertIn(".bearing(smoothBearing(location))", kotlin)
+        self.assertNotIn("TRACKING_GPS_NORTH", kotlin)
+        self.assertIn("setCompassEnabled(false)", kotlin)
+        # Recentrage automatique après un geste de l'utilisateur.
+        self.assertIn("REASON_API_GESTURE", kotlin)
+        self.assertIn("RECENTER_DELAY_MS", kotlin)
+        # Départ sur Sétif.
+        self.assertIn("START_LATITUDE = 36.1911", kotlin)
+        self.assertIn("START_LONGITUDE = 5.4137", kotlin)
+        # Bouton « cible » sans contour noir.
+        button = kotlin.split('val locateButton =', 1)[1].split('root.addView(locateButton', 1)[0]
+        self.assertNotIn("Color.BLACK", button)
 
 
 if __name__ == "__main__":

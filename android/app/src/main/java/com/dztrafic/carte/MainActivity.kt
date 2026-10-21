@@ -51,10 +51,17 @@ private const val MAP_FILE = "algeria-map.mbtiles"
 private const val STYLE_FILE = "style.json"
 private const val ALERT_SOURCE = "alerts"
 private const val ALERT_LAYER = "alerts"
+private const val ALERT_CLUSTER_LAYER = "alerts-cluster"
+private const val MIXED_ICON = "mixed"
+private const val GROUP_RADIUS_METERS = 50.0
+private const val RECENTER_DELAY_MS = 10_000L
+private const val MIN_BEARING_SPEED = 1.5f
+private const val CAMERA_ANIM_MS = 900
+private const val CLUSTER_TAP_ZOOM_STEP = 2.0
 private const val PERMISSION_REQUEST = 1
-private const val START_LATITUDE = 36.75
-private const val START_LONGITUDE = 3.06
-private const val START_ZOOM = 11.0
+private const val START_LATITUDE = 36.1911
+private const val START_LONGITUDE = 5.4137
+private const val START_ZOOM = 12.0
 private const val MIN_ZOOM = 5.0
 private const val TRACKING_ZOOM = 15.0
 private const val SEARCH_ZOOM = 13.0
@@ -62,13 +69,25 @@ private const val COPY_BUFFER_BYTES = 1 shl 16
 private const val MAX_GPS_AGE_MS = 300_000L
 private const val VOYANT_MS = 5_000L
 private const val CONFIRM_MS = 10_000L
-private const val ALERT_ICON_DP = 34
-private const val TAP_RADIUS_DP = 22
+private const val ALERT_ICON_DP = 48
+private const val TAP_RADIUS_DP = 30
 private const val ORANGE = 0xFFFF6D00.toInt()
 
 private enum class LabelLanguage(val buttonText: String, val expression: String) {
     ARABIC("AR", """["coalesce",["get","name_ar"],["get","name"],["get","name_fr"]]"""),
     FRENCH("FR", """["coalesce",["get","name_fr"],["get","name"],["get","name_ar"]]"""),
+}
+
+private class AlertGroup(val latitude: Double, val longitude: Double) {
+    val counts = LinkedHashMap<String, Int>()
+    var total = 0
+
+    fun add(alert: Alert) {
+        val type = if (alert.type in AlertTypes.all) alert.type else AlertTypes.DANGER
+        val weight = alert.confirmations.coerceAtLeast(1)
+        counts[type] = (counts[type] ?: 0) + weight
+        total += weight
+    }
 }
 
 class MainActivity : Activity() {
@@ -88,9 +107,13 @@ class MainActivity : Activity() {
     private var mapUrl = ""
     private var language = LabelLanguage.ARABIC
     private var pendingConfirmation: Alert? = null
+    private var followLocation = true
+    private var positioned = false
+    private var mapBearing = 0.0
 
     private val hideVoyant = Runnable { voyant.visibility = View.GONE }
     private val hideConfirmation = Runnable { closeConfirmation() }
+    private val recenter = Runnable { resumeFollowing() }
 
     private val tracker = object : TrackerListener {
         override fun onLocation(location: Location) = showLocation(location)
@@ -196,7 +219,7 @@ class MainActivity : Activity() {
 
         voyant = TextView(this).apply {
             text = "!"
-            textSize = 28f
+            textSize = 44f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -209,8 +232,8 @@ class MainActivity : Activity() {
             visibility = View.GONE
             contentDescription = "تحذير قريب"
         }
-        root.addView(voyant, FrameLayout.LayoutParams(dp(54), dp(54), Gravity.TOP or Gravity.END)
-            .apply { setMargins(0, dp(72), dp(12), 0) })
+        root.addView(voyant, FrameLayout.LayoutParams(dp(84), dp(84), Gravity.TOP or Gravity.END)
+            .apply { setMargins(0, dp(12), dp(12), 0) })
 
         gpsBanner = TextView(this).apply {
             text = gpsBannerText()
@@ -219,7 +242,7 @@ class MainActivity : Activity() {
             setTextColor(Color.WHITE)
             background = rounded(Color.rgb(183, 43, 39), 14)
             setPadding(dp(16), dp(12), dp(16), dp(12))
-            maxWidth = resources.displayMetrics.widthPixels - dp(24)
+            maxWidth = resources.displayMetrics.widthPixels - dp(12 + 84 + 10 + 12)
             elevation = dp(5).toFloat()
             visibility = View.GONE
             setOnClickListener {
@@ -232,8 +255,8 @@ class MainActivity : Activity() {
         }
         root.addView(gpsBanner, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.START,
-        ).apply { setMargins(dp(12), dp(108), 0, 0) })
+            Gravity.TOP or Gravity.END,
+        ).apply { setMargins(0, dp(12), dp(12), 0) })
 
         status = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -251,9 +274,9 @@ class MainActivity : Activity() {
 
         confirmBox = buildConfirmBox()
         root.addView(confirmBox, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
-        ).apply { setMargins(dp(12), 0, dp(12), dp(100)) })
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+        ).apply { setMargins(dp(12), dp(110), dp(12), 0) })
 
         val reportButton = Button(this).apply {
             text = "+"
@@ -317,27 +340,28 @@ class MainActivity : Activity() {
         root.addView(menuButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END)
             .apply { setMargins(0, 0, dp(14), dp(20)) })
 
-        val capButton = ImageView(this).apply {
-            setImageDrawable(NavArrowDrawable(Color.rgb(25, 118, 210)))
-            setPadding(dp(14), dp(14), dp(14), dp(14))
-            contentDescription = "Recentrer et zoomer sur ma position"
+        val locateButton = ImageView(this).apply {
+            setImageDrawable(TargetDrawable(Color.rgb(25, 54, 46)))
+            setPadding(dp(15), dp(15), dp(15), dp(15))
+            contentDescription = "Recentrer sur ma position"
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.WHITE)
+                setStroke(dp(1), Color.rgb(210, 220, 214))
             }
             elevation = dp(5).toFloat()
             isClickable = true
             setOnClickListener { recenterAndZoom() }
         }
-        root.addView(capButton, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.BOTTOM or Gravity.START)
-            .apply { setMargins(dp(16), 0, 0, dp(20)) })
+        root.addView(locateButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.START)
+            .apply { setMargins(dp(14), 0, 0, dp(20)) })
         return root
     }
 
     private fun buildConfirmBox(): LinearLayout {
         confirmTitle = TextView(this).apply {
             text = if (language == LabelLanguage.ARABIC) "هل التبليغ صحيح؟" else "Le danger est-il toujours présent ?"
-            textSize = 17f
+            textSize = 21f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(Color.rgb(24, 53, 42))
             gravity = Gravity.CENTER
@@ -345,9 +369,12 @@ class MainActivity : Activity() {
         val yes = Button(this).apply {
             text = "👍 نعم"
             setTextColor(Color.WHITE)
-            background = rounded(Color.rgb(22, 125, 79), 12)
-            textSize = 14f
+            background = rounded(Color.rgb(22, 125, 79), 14)
+            textSize = 20f
             isAllCaps = false
+            minWidth = 0
+            minHeight = 0
+            setPadding(dp(8), 0, dp(8), 0)
             setOnClickListener {
                 pendingConfirmation?.let { AlertsRepository.confirm(it.id) }
                 closeConfirmation()
@@ -356,21 +383,24 @@ class MainActivity : Activity() {
         val no = Button(this).apply {
             text = "👎 لا"
             setTextColor(Color.WHITE)
-            background = rounded(Color.rgb(184, 52, 47), 12)
-            textSize = 14f
+            background = rounded(Color.rgb(184, 52, 47), 14)
+            textSize = 20f
             isAllCaps = false
+            minWidth = 0
+            minHeight = 0
+            setPadding(dp(8), 0, dp(8), 0)
             setOnClickListener { closeConfirmation() }
         }
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            addView(yes, LinearLayout.LayoutParams(dp(110), dp(48)).apply { setMargins(dp(6), dp(10), dp(6), 0) })
-            addView(no, LinearLayout.LayoutParams(dp(110), dp(48)).apply { setMargins(dp(6), dp(10), dp(6), 0) })
+            addView(yes, LinearLayout.LayoutParams(0, dp(62), 1f).apply { setMargins(dp(6), dp(14), dp(6), 0) })
+            addView(no, LinearLayout.LayoutParams(0, dp(62), 1f).apply { setMargins(dp(6), dp(14), dp(6), 0) })
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(Color.WHITE, 20, Color.rgb(226, 233, 228))
-            setPadding(dp(18), dp(14), dp(18), dp(14))
+            setPadding(dp(20), dp(18), dp(20), dp(18))
             elevation = dp(10).toFloat()
             visibility = View.GONE
             addView(confirmTitle)
@@ -389,8 +419,46 @@ class MainActivity : Activity() {
             .forEach { id -> style.getLayerAs<SymbolLayer>(id)?.setProperties(PropertyFactory.textField(expression)) }
     }
 
+    private fun smoothBearing(location: Location): Double {
+        if (location.hasBearing() && location.hasSpeed() && location.speed >= MIN_BEARING_SPEED) {
+            val delta = ((location.bearing - mapBearing + 540.0) % 360.0) - 180.0
+            mapBearing = (mapBearing + delta * 0.4 + 360.0) % 360.0
+        }
+        return mapBearing
+    }
+
+    /** Centre la carte sur la position et la tourne pour que le sens de la route soit vers le haut. */
+    private fun followCamera(location: Location, resetZoom: Boolean): Boolean {
+        val currentMap = map ?: return false
+        if (currentMap.style == null) return false
+        val zoom = if (resetZoom) TRACKING_ZOOM else currentMap.cameraPosition.zoom
+        val position = CameraPosition.Builder()
+            .target(LatLng(location.latitude, location.longitude))
+            .zoom(zoom)
+            .bearing(smoothBearing(location))
+            .tilt(0.0)
+            .build()
+        currentMap.animateCamera(CameraUpdateFactory.newCameraPosition(position), CAMERA_ANIM_MS)
+        return true
+    }
+
+    /** L'utilisateur a bougé la carte : on arrête de la suivre, puis on se recentre seul après un moment. */
+    private fun pauseFollowing() {
+        followLocation = false
+        handler.removeCallbacks(recenter)
+        handler.postDelayed(recenter, RECENTER_DELAY_MS)
+    }
+
+    private fun resumeFollowing() {
+        handler.removeCallbacks(recenter)
+        followLocation = true
+        val location = TrackerHub.lastLocation ?: return
+        if (System.currentTimeMillis() - location.time <= MAX_GPS_AGE_MS) {
+            followCamera(location, resetZoom = true)
+        }
+    }
+
     private fun recenterAndZoom() {
-        val currentMap = map ?: return
         val location = TrackerHub.lastLocation
         if (location == null || System.currentTimeMillis() - location.time > MAX_GPS_AGE_MS) {
             Toast.makeText(
@@ -400,22 +468,9 @@ class MainActivity : Activity() {
             ).show()
             return
         }
-        val component = currentMap.locationComponent
-        if (component.isLocationComponentActivated) {
-            // Suit la position GPS tout en gardant le nord en haut de la carte.
-            component.cameraMode = CameraMode.TRACKING_GPS_NORTH
-            component.zoomWhileTracking(TRACKING_ZOOM)
-        }
-        currentMap.animateCamera(
-            CameraUpdateFactory.newCameraPosition(
-                CameraPosition.Builder()
-                    .target(LatLng(location.latitude, location.longitude))
-                    .zoom(TRACKING_ZOOM)
-                    .bearing(0.0)
-                    .tilt(0.0)
-                    .build()
-            )
-        )
+        handler.removeCallbacks(recenter)
+        followLocation = true
+        followCamera(location, resetZoom = true)
     }
 
     private fun showStatus(text: String?) {
@@ -485,16 +540,17 @@ class MainActivity : Activity() {
         // Les crédits restent accessibles dans le menu, sans encombrer la carte.
         readyMap.uiSettings.setAttributionEnabled(false)
         readyMap.uiSettings.setLogoEnabled(false)
-        // Boussole en haut à droite (apparaît quand la carte est tournée), mêmes marges que le compteur de vitesse.
-        readyMap.uiSettings.setCompassEnabled(true)
-        readyMap.uiSettings.setCompassGravity(Gravity.TOP or Gravity.END)
-        readyMap.uiSettings.setCompassMargins(0, dp(12), dp(12), 0)
+        // Pas de boussole : le bouton cible en bas à gauche remet la carte dans le sens de la route.
+        readyMap.uiSettings.setCompassEnabled(false)
         readyMap.setMinZoomPreference(MIN_ZOOM)
         readyMap.cameraPosition = CameraPosition.Builder()
             .target(LatLng(START_LATITUDE, START_LONGITUDE))
             .zoom(START_ZOOM)
             .build()
         readyMap.addOnMapClickListener { showAlertInfo(it) }
+        readyMap.addOnCameraMoveStartedListener { reason ->
+            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) pauseFollowing()
+        }
         reloadStyle()
     }
 
@@ -507,8 +563,10 @@ class MainActivity : Activity() {
         currentMap.setStyle(Style.Builder().fromJson(json)) { style ->
             showStatus(null)
             AlertTypes.all.forEach { style.addImage(it, alertIcon(AlertTypes.emoji(it))) }
+            style.addImage(MIXED_ICON, alertIcon("❗"))
             renderAlerts(TrackerHub.alerts)
             enableLocation(style)
+            TrackerHub.lastLocation?.let { showLocation(it) }
         }
     }
 
@@ -517,16 +575,16 @@ class MainActivity : Activity() {
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val center = size / 2f
-        val border = size * 0.12f
-        val radius = center - border / 2
-        canvas.drawCircle(center, center, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
-        canvas.drawCircle(center, center, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = ORANGE
-            style = Paint.Style.STROKE
-            strokeWidth = border
-        })
+        val whiteRing = size * 0.07f
+        val orangeRing = size * 0.11f
+        fun disk(radius: Float, fill: Int) =
+            canvas.drawCircle(center, center, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fill })
+        disk(center, Color.argb(70, 0, 0, 0))
+        disk(center - dp(1), Color.WHITE)
+        disk(center - dp(1) - whiteRing, ORANGE)
+        disk(center - dp(1) - whiteRing - orangeRing, Color.WHITE)
         val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = size * 0.5f
+            textSize = size * 0.46f
             textAlign = Paint.Align.CENTER
         }
         canvas.drawText(emoji, center, center - (glyph.descent() + glyph.ascent()) / 2, glyph)
@@ -534,18 +592,27 @@ class MainActivity : Activity() {
     }
 
     private fun renderAlerts(alerts: List<Alert>) {
-        val features = JSONArray()
+        // Les signalements à moins de 50 m sont regroupés sur une seule icône.
+        val groups = ArrayList<AlertGroup>()
         alerts.forEach { alert ->
+            val group = groups.firstOrNull {
+                distanceMeters(it.latitude, it.longitude, alert.latitude, alert.longitude) < GROUP_RADIUS_METERS
+            } ?: AlertGroup(alert.latitude, alert.longitude).also { groups.add(it) }
+            group.add(alert)
+        }
+        val features = JSONArray()
+        groups.forEach { group ->
+            val properties = JSONObject()
+                .put("icon", if (group.counts.size == 1) group.counts.keys.first() else MIXED_ICON)
+                .put("total", group.total)
+            AlertTypes.all.forEach { properties.put(it, group.counts[it] ?: 0) }
             features.put(
                 JSONObject()
                     .put("type", "Feature")
                     .put("geometry", JSONObject()
                         .put("type", "Point")
-                        .put("coordinates", JSONArray().put(alert.longitude).put(alert.latitude)))
-                    .put("properties", JSONObject()
-                        .put("type", alert.type)
-                        .put("title", alert.title)
-                        .put("confirmations", alert.confirmations)),
+                        .put("coordinates", JSONArray().put(group.longitude).put(group.latitude)))
+                    .put("properties", properties),
             )
         }
         val collection = JSONObject().put("type", "FeatureCollection").put("features", features)
@@ -557,11 +624,65 @@ class MainActivity : Activity() {
         val point = currentMap.projection.toScreenLocation(latLng)
         val radius = dp(TAP_RADIUS_DP).toFloat()
         val area = RectF(point.x - radius, point.y - radius, point.x + radius, point.y + radius)
-        val feature = currentMap.queryRenderedFeatures(area, ALERT_LAYER).firstOrNull() ?: return false
-        val title = feature.getStringProperty("title") ?: return false
-        val confirmations = feature.getNumberProperty("confirmations")?.toInt() ?: 1
-        Toast.makeText(this, "$title ($confirmations)", Toast.LENGTH_SHORT).show()
+        val features = currentMap.queryRenderedFeatures(area, ALERT_LAYER, ALERT_CLUSTER_LAYER)
+        if (features.isEmpty()) return false
+        val single = features.firstOrNull { !it.hasProperty("point_count") }
+        if (single != null) {
+            val counts = AlertTypes.all.associateWith { single.getNumberProperty(it)?.toInt() ?: 0 }
+            val total = single.getNumberProperty("total")?.toInt() ?: counts.values.sum()
+            showGroupPopup(total, counts)
+            return true
+        }
+        // Un cluster : on zoome pour séparer les icônes.
+        pauseFollowing()
+        currentMap.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(latLng, currentMap.cameraPosition.zoom + CLUSTER_TAP_ZOOM_STEP),
+        )
         return true
+    }
+
+    private fun showGroupPopup(total: Int, counts: Map<String, Int>) {
+        val arabic = language == LabelLanguage.ARABIC
+        lateinit var dialog: AlertDialog
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(Color.WHITE, 24)
+            setPadding(dp(22), dp(20), dp(22), dp(18))
+        }
+        content.addView(TextView(this).apply {
+            text = if (arabic) "⚠️ عدد التبليغات ($total)" else "⚠️ Nombre de signalements ($total)"
+            textSize = 20f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(24, 53, 42))
+            gravity = Gravity.CENTER
+        })
+        AlertTypes.all.forEach { type ->
+            val count = counts[type] ?: 0
+            if (count > 0) {
+                content.addView(TextView(this).apply {
+                    text = "${AlertTypes.emoji(type)}  ${alertLabel(type)}  ($count)"
+                    textSize = 18f
+                    setTextColor(Color.rgb(60, 76, 68))
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(14), 0, 0)
+                })
+            }
+        }
+        val close = Button(this).apply {
+            text = if (arabic) "إغلاق" else "Fermer"
+            isAllCaps = false
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(104, 116, 109), 16)
+            setOnClickListener { dialog.dismiss() }
+        }
+        content.addView(close, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)).apply {
+            topMargin = dp(20)
+        })
+        dialog = AlertDialog.Builder(this).setView(content).create()
+        dialog.setOnShowListener { dialog.window?.setBackgroundDrawableResource(android.R.color.transparent) }
+        dialog.show()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
 
     private fun enableLocation(style: Style) {
@@ -574,18 +695,16 @@ class MainActivity : Activity() {
         )
         component.isLocationComponentEnabled = true
         component.renderMode = RenderMode.NORMAL
-    }
-
-    private fun applyTracking() {
-        val component = map?.locationComponent ?: return
-        if (!component.isLocationComponentActivated) return
-        component.cameraMode = CameraMode.TRACKING_GPS_NORTH
-        component.zoomWhileTracking(TRACKING_ZOOM)
+        component.cameraMode = CameraMode.NONE
     }
 
     private fun showLocation(location: Location) {
         val kmh = if (location.hasSpeed()) (location.speed * 3.6f).roundToInt().coerceAtLeast(0) else 0
         speedText.text = kmh.toString()
+        if (followLocation && System.currentTimeMillis() - location.time <= MAX_GPS_AGE_MS) {
+            // Premier point GPS : on se place sur la position avec le zoom de conduite.
+            if (followCamera(location, resetZoom = !positioned)) positioned = true
+        }
     }
 
     private fun showVoyant() {

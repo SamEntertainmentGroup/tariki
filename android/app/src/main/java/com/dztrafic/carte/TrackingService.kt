@@ -13,8 +13,6 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -31,9 +29,6 @@ private const val NEAR_WARNING_METERS = 100.0
 private const val PASSED_ZONE_METERS = 30.0
 private const val RESET_METERS = 250.0
 private const val CONFIRM_MIN_AGE_SECONDS = 300L
-private const val BEEP_DURATION_MS = 150
-private const val BEEP_GAP_MS = 250L
-private const val BEEP_RELEASE_MS = 700L
 private const val PREFS_NAME = "dz_settings"
 private const val KEY_TRACKING = "tracking_enabled"
 private const val TEXT_READY = "📡 التتبع نشط"
@@ -204,20 +199,9 @@ class TrackingService : Service(), LocationListener {
     }
 
     private fun warn(alert: Alert, distance: Double) {
-        beepTwice()
+        AlertSound.play()
         updateNotification("${AlertTypes.emoji(alert.type)} ${alert.title} · ${distance.toInt()} م")
         TrackerHub.publishProximity(alert, distance.toInt())
-    }
-
-    private fun beepTwice() {
-        val tone = try {
-            ToneGenerator(AudioManager.STREAM_MUSIC, 100)
-        } catch (ignored: RuntimeException) {
-            return
-        }
-        tone.startTone(ToneGenerator.TONE_PROP_BEEP, BEEP_DURATION_MS)
-        handler.postDelayed({ tone.startTone(ToneGenerator.TONE_PROP_BEEP, BEEP_DURATION_MS) }, BEEP_GAP_MS)
-        handler.postDelayed({ tone.release() }, BEEP_RELEASE_MS)
     }
 
     companion object {
