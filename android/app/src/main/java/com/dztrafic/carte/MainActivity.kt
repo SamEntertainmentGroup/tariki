@@ -16,6 +16,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -88,7 +89,7 @@ private enum class LabelLanguage(val buttonText: String, val expression: String)
     FRENCH("FR", """["coalesce",["get","name_fr"],["get","name"],["get","name_ar"]]"""),
 }
 
-private enum class SystemState { OK, NO_GPS, NO_NOTIFICATIONS, SEARCHING }
+private enum class SystemState { OK, NO_GPS, NO_NOTIFICATIONS, NO_BATTERY, SEARCHING }
 
 private class AlertGroup(val latitude: Double, val longitude: Double) {
     val counts = LinkedHashMap<String, Int>()
@@ -200,6 +201,17 @@ class MainActivity : Activity() {
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).areNotificationsEnabled()
     }.getOrDefault(true)
 
+    private fun batteryOk(): Boolean = runCatching {
+        (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
+    }.getOrDefault(true)
+
+    private fun locationOk() = hasFineLocation() && isDeviceGpsEnabled()
+
+    private fun notifOk() = notificationsEnabled()
+
+    /** Les trois autorisations exigées : localisation (GPS), notifications et optimisation batterie. */
+    private fun allOk() = locationOk() && notifOk() && batteryOk()
+
     private fun hasFreshFix(): Boolean {
         val location = TrackerHub.lastLocation ?: return false
         return System.currentTimeMillis() - location.time <= SEARCH_STALE_MS
@@ -210,9 +222,10 @@ class MainActivity : Activity() {
         if (!::gpsBanner.isInitialized) return
         val arabic = language == LabelLanguage.ARABIC
         systemState = when {
-            !hasFineLocation() || !isDeviceGpsEnabled() -> SystemState.NO_GPS
-            !notificationsEnabled() -> SystemState.NO_NOTIFICATIONS
-            !hasFreshFix() -> SystemState.SEARCHING
+            !locationOk() -> SystemState.NO_GPS
+            !notifOk() -> SystemState.NO_NOTIFICATIONS
+            !batteryOk() -> SystemState.NO_BATTERY
+            allOk() && !hasFreshFix() -> SystemState.SEARCHING
             else -> SystemState.OK
         }
         val red = Color.rgb(183, 43, 39)
@@ -223,6 +236,9 @@ class MainActivity : Activity() {
             )
             SystemState.NO_NOTIFICATIONS -> Pair(
                 if (arabic) "فعّل الإشعارات 🔔" else "🔔 Activez les notifications", red,
+            )
+            SystemState.NO_BATTERY -> Pair(
+                if (arabic) "عطّل تحسين البطارية 🔋" else "🔋 Désactivez l'optimisation batterie", red,
             )
             SystemState.SEARCHING -> Pair(
                 if (arabic) "جارٍ البحث عن إشارة GPS... 📡" else "📡 Recherche du signal GPS…", blue,
@@ -258,6 +274,15 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun fixBattery() {
+        val opened = runCatching {
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+        }
+        if (opened.isFailure) {
+            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        }
+    }
+
     private fun handleStatusTap() {
         when (systemState) {
             SystemState.NO_GPS -> {
@@ -270,6 +295,7 @@ class MainActivity : Activity() {
                 }
             }
             SystemState.NO_NOTIFICATIONS -> fixNotifications()
+            SystemState.NO_BATTERY -> fixBattery()
             else -> Unit
         }
     }
@@ -328,19 +354,25 @@ class MainActivity : Activity() {
             .apply { setMargins(0, dp(12), dp(12), 0) })
 
         gpsBanner = TextView(this).apply {
-            textSize = 20f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
-            setPadding(dp(18), dp(16), dp(18), dp(16))
+            maxLines = 1
+            setPadding(dp(10), dp(6), dp(10), dp(6))
             elevation = dp(5).toFloat()
             visibility = View.GONE
+            // Le texte rétrécit pour tenir sur une seule ligne, sans passer sous le compteur de vitesse.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                setAutoSizeTextTypeUniformWithConfiguration(10, 15, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            } else {
+                textSize = 12f
+            }
             setOnClickListener { handleStatusTap() }
         }
         root.addView(gpsBanner, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.CENTER_HORIZONTAL,
-        ).apply { setMargins(dp(12), dp(110), dp(12), 0) })
+            resources.displayMetrics.widthPixels - dp(12 + 84 + 8 + 12), dp(46),
+            Gravity.TOP or Gravity.END,
+        ).apply { setMargins(0, dp(12), dp(12), 0) })
 
         status = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -444,11 +476,11 @@ class MainActivity : Activity() {
 
     private fun answerButton(label: String, color: Int, onClick: () -> Unit) = TextView(this).apply {
         text = label
-        textSize = 21f
+        textSize = 18f
         typeface = android.graphics.Typeface.DEFAULT_BOLD
         setTextColor(Color.WHITE)
         gravity = Gravity.CENTER
-        background = rounded(color, 16)
+        background = rounded(color, 14)
         isClickable = true
         setOnClickListener { onClick() }
     }
@@ -470,11 +502,13 @@ class MainActivity : Activity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            addView(yes, LinearLayout.LayoutParams(0, dp(68), 1f).apply { setMargins(dp(6), dp(22), dp(6), 0) })
-            addView(no, LinearLayout.LayoutParams(0, dp(68), 1f).apply { setMargins(dp(6), dp(22), dp(6), 0) })
+            addView(yes, LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(6), dp(20), dp(6), 0) })
+            addView(no, LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(6), dp(20), dp(6), 0) })
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(260)
             background = rounded(Color.WHITE, 20, Color.rgb(226, 233, 228))
             setPadding(dp(20), dp(22), dp(20), dp(28))
             elevation = dp(10).toFloat()
@@ -664,7 +698,7 @@ class MainActivity : Activity() {
         disk(center - dp(1) - whiteRing, ORANGE)
         disk(center - dp(1) - whiteRing - orangeRing, Color.WHITE)
         val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = size * 0.30f
+            textSize = size * 0.38f
             textAlign = Paint.Align.CENTER
         }
         canvas.drawText(emoji, center, center - (glyph.descent() + glyph.ascent()) / 2, glyph)

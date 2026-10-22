@@ -11,8 +11,8 @@ android {
         applicationId = "com.dztrafic.carte"
         minSdk = 24
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.7"
+        versionCode = 7
+        versionName = "0.8"
         buildConfigField("String", "ALERTS_URL", "\"${providers.gradleProperty("alertsUrl").getOrElse("https://jarti.app/wp-admin/admin-ajax.php")}\"")
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
