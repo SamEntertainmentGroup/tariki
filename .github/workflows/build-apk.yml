@@ -2,6 +2,11 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      with_map:
+        description: "Inclure la carte (≈100 Mo). À cocher pour la première installation ou pour mettre à jour la carte."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,6 +33,7 @@ jobs:
           esac
 
       - name: Download map from release
+        if: ${{ inputs.with_map }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -38,6 +44,7 @@ jobs:
           ls -l android/app/src/main/assets
 
       - name: Check map file
+        if: ${{ inputs.with_map }}
         shell: bash
         run: |
           python3 tools/inspect_mbtiles.py android/app/src/main/assets/algeria-map.mbtiles | tee map-report.txt
@@ -46,7 +53,12 @@ jobs:
         shell: bash
         run: |
           python3 tools/fetch_glyphs.py --output android/app/src/main/assets/glyphs | tee glyph-report.txt
-          { echo '```'; cat map-report.txt; echo; cat glyph-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '```'
+            if [ -f map-report.txt ]; then cat map-report.txt; echo; fi
+            cat glyph-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -59,15 +71,31 @@ jobs:
         with:
           gradle-version: "8.14.3"
 
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/tariki.keystore"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/tariki.keystore" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "Clé de signature fixe : les mises à jour par-dessus l'appli installée fonctionneront."
+          else
+            echo "::warning::Secrets KEYSTORE_BASE64 / KEYSTORE_PASSWORD absents : cet APK ne pourra pas se mettre à jour par-dessus une version déjà installée."
+          fi
+
       - name: Build debug APK
         working-directory: android
-        run: gradle assembleDebug --no-daemon --stacktrace -PalertsUrl="$ALERTS_URL"
+        run: gradle assembleDebug --no-daemon --stacktrace -PalertsUrl="$ALERTS_URL" -PversionCodeOverride="$GITHUB_RUN_NUMBER"
 
       - name: Check APK content
         run: |
           APK=android/app/build/outputs/apk/debug/app-debug.apk
           ls -l "$APK"
-          for entry in assets/style.json assets/algeria-map.mbtiles assets/glyphs/NotoSans-Regular/0-255.pbf; do
+          entries="assets/style.json assets/glyphs/NotoSans-Regular/0-255.pbf"
+          if [ "${{ inputs.with_map }}" = "true" ]; then entries="$entries assets/algeria-map.mbtiles"; fi
+          for entry in $entries; do
             unzip -l "$APK" | grep -q "$entry" || { echo "Manquant dans l'APK : $entry"; exit 1; }
           done
           echo "Contenu de l'APK vérifié"
@@ -75,7 +103,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: dz-carte-apk
+          name: ${{ inputs.with_map && 'dz-carte-apk-avec-carte' || 'dz-carte-apk-sans-carte' }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           compression-level: 0
