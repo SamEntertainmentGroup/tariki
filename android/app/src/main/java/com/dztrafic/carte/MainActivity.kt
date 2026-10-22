@@ -640,6 +640,14 @@ class MainActivity : Activity() {
         val stamp = packageManager.getPackageInfo(packageName, 0).lastUpdateTime.toString()
         if (target.exists() && marker.exists() && marker.readText() == stamp) return target
 
+        // APK allégé (sans carte) : on garde la carte déjà installée sur le téléphone lors de la mise à jour.
+        val bundled = assets.list("")?.contains(MAP_FILE) == true
+        if (!bundled) {
+            check(target.exists() && target.length() > 0) { "installez d'abord l'APK avec carte" }
+            marker.writeText(stamp)
+            return target
+        }
+
         val temporary = File(filesDir, "$MAP_FILE.tmp")
         assets.open(MAP_FILE).use { input ->
             temporary.outputStream().use { output -> input.copyTo(output, COPY_BUFFER_BYTES) }

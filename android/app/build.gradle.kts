@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val keystorePath = System.getenv("KEYSTORE_PATH").orEmpty()
+val keystorePassword = System.getenv("KEYSTORE_PASSWORD").orEmpty()
+
 android {
     namespace = "com.dztrafic.carte"
     compileSdk = 36
@@ -11,11 +14,29 @@ android {
         applicationId = "com.dztrafic.carte"
         minSdk = 24
         targetSdk = 34
-        versionCode = 7
+        versionCode = providers.gradleProperty("versionCodeOverride").map { it.toInt() }.getOrElse(8)
         versionName = "0.8"
         buildConfigField("String", "ALERTS_URL", "\"${providers.gradleProperty("alertsUrl").getOrElse("https://jarti.app/wp-admin/admin-ajax.php")}\"")
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    // Clé de signature fixe (fournie par GitHub) : indispensable pour mettre à jour par-dessus l'appli déjà installée.
+    signingConfigs {
+        if (keystorePath.isNotEmpty() && keystorePassword.isNotEmpty()) {
+            create("tariki") {
+                storeFile = file(keystorePath)
+                storePassword = keystorePassword
+                keyAlias = "tariki"
+                keyPassword = keystorePassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfigs.findByName("tariki")?.let { signingConfig = it }
         }
     }
 
