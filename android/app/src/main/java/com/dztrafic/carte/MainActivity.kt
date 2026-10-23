@@ -21,26 +21,34 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.ListView
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.location.LocationComponentActivationOptions
 import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.location.modes.RenderMode
@@ -59,6 +67,7 @@ private const val STYLE_FILE = "style.json"
 private const val ALERT_SOURCE = "alerts"
 private const val ALERT_LAYER = "alerts"
 private const val ALERT_CLUSTER_LAYER = "alerts-cluster"
+private const val ROUTE_SOURCE = "route"
 private const val MIXED_ICON = "mixed"
 private const val GROUP_RADIUS_METERS = 50.0
 private const val RECENTER_DELAY_MS = 10_000L
@@ -126,6 +135,15 @@ class MainActivity : Activity() {
     private var positioned = false
     private var mapBearing = 0.0
     private var systemState = SystemState.OK
+    private var routingGraph: RoutingGraph? = null
+    private var routePlaces: List<RoutePlace> = emptyList()
+    private var routeFrom: RoutePlace? = null
+    private var routeTo: RoutePlace? = null
+    private var routeShown = false
+    private var routeBusy = false
+    private lateinit var routeCard: LinearLayout
+    private lateinit var routeCardTitle: TextView
+    private lateinit var routeCardInfo: TextView
     private var askedLocation = false
     private var askedNotifications = false
 
@@ -431,16 +449,70 @@ class MainActivity : Activity() {
         }
         languageButton.elevation = dp(5).toFloat()
         languageButton.setPadding(dp(2), dp(2), dp(2), dp(2))
+        val routeButton = smallButton("🛣️") { openRoutePlanner() }.apply {
+            textSize = 22f
+            contentDescription = "Itinéraire entre villes"
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.WHITE)
+                setStroke(dp(1), Color.rgb(210, 220, 214))
+            }
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+        }
         extraButtons = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             visibility = View.GONE
+            addView(routeButton, LinearLayout.LayoutParams(dp(52), dp(52)).apply { bottomMargin = dp(8) })
             addView(languageButton, LinearLayout.LayoutParams(dp(52), dp(52)))
         }
         root.addView(extraButtons, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.END,
         ).apply { setMargins(0, 0, dp(16), dp(96)) })
+
+        routeCardTitle = TextView(this).apply {
+            textSize = 15f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(24, 53, 42))
+            gravity = Gravity.CENTER
+        }
+        routeCardInfo = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Color.rgb(26, 115, 232))
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+        val routeClose = TextView(this).apply {
+            text = "✕"
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(104, 116, 109))
+            setPadding(dp(14), dp(6), dp(14), dp(6))
+            isClickable = true
+            setOnClickListener { clearRoute() }
+        }
+        routeCard = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(Color.WHITE, 16, Color.rgb(226, 233, 228))
+            elevation = dp(8).toFloat()
+            setPadding(dp(14), dp(8), dp(2), dp(8))
+            visibility = View.GONE
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(routeCardTitle)
+                    addView(routeCardInfo)
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(routeClose)
+        }
+        root.addView(routeCard, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM,
+        ).apply { setMargins(dp(14), 0, dp(14), dp(104)) })
 
         menuButton = smallButton("☰") {
             extraButtons.visibility = if (extraButtons.visibility == View.VISIBLE) View.GONE else View.VISIBLE
@@ -561,6 +633,7 @@ class MainActivity : Activity() {
 
     private fun resumeFollowing() {
         handler.removeCallbacks(recenter)
+        if (routeShown) return
         followLocation = true
         val location = TrackerHub.lastLocation ?: return
         if (System.currentTimeMillis() - location.time <= MAX_GPS_AGE_MS) {
@@ -581,6 +654,383 @@ class MainActivity : Activity() {
         handler.removeCallbacks(recenter)
         followLocation = true
         followCamera(location, resetZoom = true)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Itinéraires hors ligne entre villes
+    // ---------------------------------------------------------------------------------------------
+
+    private fun isArabic() = language == LabelLanguage.ARABIC
+
+    private fun dialogCard(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(Color.WHITE, 24)
+        setPadding(dp(22), dp(20), dp(22), dp(18))
+    }
+
+    private fun showCard(content: LinearLayout, resize: Boolean = false): AlertDialog {
+        val dialog = AlertDialog.Builder(this).setView(ScrollView(this).apply { addView(content) }).create()
+        if (resize) dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        dialog.setOnShowListener { dialog.window?.setBackgroundDrawableResource(android.R.color.transparent) }
+        dialog.show()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        return dialog
+    }
+
+    private fun openRoutePlanner() {
+        extraButtons.visibility = View.GONE
+        if (!RoutingStore.isInstalled(this)) {
+            showRoutingDownloadDialog()
+            return
+        }
+        if (routingGraph != null) {
+            showPlannerDialog()
+            return
+        }
+        Toast.makeText(this, if (isArabic()) "جارٍ التحميل…" else "Chargement…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val outcome = runCatching {
+                val graph = RoutingGraph(RoutingStore.file(applicationContext))
+                graph to graph.loadPlaces()
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val pair = outcome.getOrNull()
+                if (pair == null) {
+                    RoutingStore.delete(this)
+                    Toast.makeText(
+                        this,
+                        if (isArabic()) "ملف المسارات تالف، حمّله من جديد" else "Fichier d'itinéraires illisible : téléchargez-le à nouveau",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    routingGraph = pair.first
+                    routePlaces = pair.second
+                    showPlannerDialog()
+                }
+            }
+        }.start()
+    }
+
+    private fun showRoutingDownloadDialog() {
+        val arabic = isArabic()
+        AlertDialog.Builder(this)
+            .setTitle(if (arabic) "تحميل المسارات" else "Télécharger les itinéraires")
+            .setMessage(
+                if (arabic) {
+                    "لحساب المسارات بين مدن الجزائر بدون إنترنت، يجب تحميل ملف المسارات مرة واحدة فقط. الملف كبير، يُفضَّل استعمال شبكة Wi-Fi."
+                } else {
+                    "Pour calculer des itinéraires entre villes d'Algérie sans internet, il faut télécharger le fichier des routes une seule fois. Il est volumineux : privilégiez le Wi-Fi."
+                },
+            )
+            .setPositiveButton(if (arabic) "تحميل" else "Télécharger") { _, _ -> startRoutingDownload() }
+            .setNegativeButton(if (arabic) "إلغاء" else "Annuler", null)
+            .show()
+    }
+
+    private fun startRoutingDownload() {
+        val arabic = isArabic()
+        val cancelled = AtomicBoolean(false)
+        val progressText = TextView(this).apply {
+            text = if (arabic) "جارٍ التحميل…" else "Téléchargement…"
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(12))
+        }
+        val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            isIndeterminate = true
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(20), dp(24), dp(8))
+            addView(progressText)
+            addView(progressBar)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (arabic) "تحميل المسارات" else "Téléchargement des itinéraires")
+            .setView(content)
+            .setCancelable(false)
+            .setNegativeButton(if (arabic) "إلغاء" else "Annuler") { _, _ -> cancelled.set(true) }
+            .create()
+        dialog.show()
+        Thread {
+            var lastUpdate = 0L
+            val outcome = runCatching {
+                RoutingStore.download(
+                    applicationContext,
+                    { done, total ->
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdate > 300) {
+                            lastUpdate = now
+                            runOnUiThread {
+                                val doneMb = done / 1_000_000.0
+                                if (total > 0) {
+                                    progressBar.isIndeterminate = false
+                                    progressBar.progress = (done * 100 / total).toInt()
+                                    progressText.text = String.format(Locale.US, "%.0f / %.0f MB", doneMb, total / 1_000_000.0)
+                                } else {
+                                    progressText.text = String.format(Locale.US, "%.0f MB", doneMb)
+                                }
+                            }
+                        }
+                    },
+                    { cancelled.get() },
+                )
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                dialog.dismiss()
+                val error = outcome.exceptionOrNull()
+                when {
+                    error == null -> {
+                        Toast.makeText(this, if (arabic) "تم تحميل المسارات" else "Itinéraires téléchargés", Toast.LENGTH_SHORT).show()
+                        openRoutePlanner()
+                    }
+                    error is DownloadCancelled -> Unit
+                    else -> Toast.makeText(
+                        this,
+                        (if (arabic) "تعذّر التحميل: " else "Téléchargement impossible : ") + (error.message ?: ""),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun placeLine(place: RoutePlace, arabic: Boolean): String {
+        val main = place.label(arabic)
+        val other = place.label(!arabic)
+        return if (other.isNotEmpty() && other != main) "$main  ·  $other" else main
+    }
+
+    private fun pickerBox(): TextView = TextView(this).apply {
+        textSize = 17f
+        setTextColor(Color.rgb(24, 53, 42))
+        gravity = Gravity.CENTER_VERTICAL
+        background = rounded(Color.rgb(246, 248, 247), 14, Color.rgb(210, 220, 214))
+        setPadding(dp(16), dp(14), dp(16), dp(14))
+        isClickable = true
+    }
+
+    private fun captionText(text: String): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 14f
+        setTextColor(Color.rgb(104, 116, 109))
+        setPadding(dp(4), dp(16), dp(4), dp(6))
+    }
+
+    private fun showPlannerDialog() {
+        val arabic = isArabic()
+        lateinit var dialog: AlertDialog
+        val content = dialogCard()
+        content.addView(TextView(this).apply {
+            text = if (arabic) "🛣️ المسار بين المدن" else "🛣️ Itinéraire entre villes"
+            textSize = 20f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(24, 53, 42))
+            gravity = Gravity.CENTER
+        })
+        content.addView(captionText(if (arabic) "من" else "Départ"))
+        val fromBox = pickerBox()
+        content.addView(fromBox)
+        content.addView(captionText(if (arabic) "إلى" else "Arrivée"))
+        val toBox = pickerBox()
+        content.addView(toBox)
+
+        fun refresh() {
+            fromBox.text = routeFrom?.let { placeLine(it, arabic) } ?: (if (arabic) "📍 موقعي الحالي" else "📍 Ma position")
+            toBox.text = routeTo?.let { placeLine(it, arabic) } ?: (if (arabic) "اختر مدينة أو بلدية…" else "Choisissez une ville ou commune…")
+        }
+        refresh()
+        fromBox.setOnClickListener { showPlacePicker(true) { routeFrom = it; refresh() } }
+        toBox.setOnClickListener { showPlacePicker(false) { routeTo = it; refresh() } }
+
+        val compute = Button(this).apply {
+            text = if (arabic) "احسب المسار" else "Calculer l'itinéraire"
+            isAllCaps = false
+            textSize = 17f
+            setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(26, 115, 232), 16)
+            setOnClickListener {
+                val destination = routeTo
+                if (destination == null) {
+                    Toast.makeText(this@MainActivity, if (arabic) "اختر وجهة" else "Choisissez une arrivée", Toast.LENGTH_SHORT).show()
+                } else {
+                    dialog.dismiss()
+                    computeRoute(routeFrom, destination)
+                }
+            }
+        }
+        content.addView(compute, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)).apply { topMargin = dp(24) })
+        content.addView(TextView(this).apply {
+            text = if (arabic) "حذف ملف المسارات" else "Supprimer le fichier d'itinéraires"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(140, 152, 146))
+            setPadding(0, dp(18), 0, dp(4))
+            isClickable = true
+            setOnClickListener { confirmDeleteRouting(dialog) }
+        })
+        dialog = showCard(content)
+    }
+
+    private fun showPlacePicker(allowMyPosition: Boolean, onPicked: (RoutePlace?) -> Unit) {
+        val arabic = isArabic()
+        lateinit var dialog: AlertDialog
+        var shown: List<RoutePlace?> = emptyList()
+        val resultsAdapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, ArrayList<String>())
+
+        fun refresh(query: String) {
+            val results = searchPlaces(routePlaces, query, 40)
+            shown = if (allowMyPosition && query.isBlank()) listOf<RoutePlace?>(null) + results else results
+            resultsAdapter.clear()
+            resultsAdapter.addAll(shown.map { place ->
+                if (place == null) (if (arabic) "📍 موقعي الحالي" else "📍 Ma position") else placeLine(place, arabic)
+            })
+        }
+
+        val search = EditText(this).apply {
+            hint = if (arabic) "ابحث عن مدينة أو بلدية" else "Rechercher une ville ou commune"
+            textSize = 17f
+            setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT
+            background = rounded(Color.rgb(246, 248, 247), 14, Color.rgb(210, 220, 214))
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(editable: Editable?) {
+                    refresh(editable?.toString().orEmpty())
+                }
+            })
+        }
+        val list = ListView(this).apply {
+            adapter = resultsAdapter
+            setOnItemClickListener { _, _, position, _ ->
+                val choice = shown.getOrNull(position)
+                dialog.dismiss()
+                onPicked(choice)
+            }
+        }
+        val content = dialogCard()
+        content.addView(search)
+        content.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(320)).apply { topMargin = dp(12) })
+        refresh("")
+        dialog = showCard(content, resize = true)
+    }
+
+    private fun confirmDeleteRouting(parent: AlertDialog) {
+        val arabic = isArabic()
+        AlertDialog.Builder(this)
+            .setMessage(if (arabic) "حذف ملف المسارات من الهاتف؟ يمكنك تحميله من جديد لاحقاً." else "Supprimer le fichier d'itinéraires du téléphone ? Vous pourrez le télécharger à nouveau.")
+            .setPositiveButton(if (arabic) "حذف" else "Supprimer") { _, _ ->
+                parent.dismiss()
+                clearRoute()
+                routingGraph?.close()
+                routingGraph = null
+                routePlaces = emptyList()
+                routeFrom = null
+                routeTo = null
+                RoutingStore.delete(this)
+            }
+            .setNegativeButton(if (arabic) "إلغاء" else "Annuler", null)
+            .show()
+    }
+
+    private fun computeRoute(from: RoutePlace?, to: RoutePlace) {
+        if (routeBusy) return
+        val graph = routingGraph ?: return
+        val arabic = isArabic()
+        val origin: Pair<Double, Double> = if (from != null) {
+            Pair(from.latitude, from.longitude)
+        } else {
+            val location = TrackerHub.lastLocation
+            if (location == null || System.currentTimeMillis() - location.time > MAX_GPS_AGE_MS) {
+                Toast.makeText(this, if (arabic) "في انتظار إشارة GPS…" else "En attente de la position GPS…", Toast.LENGTH_SHORT).show()
+                return
+            }
+            Pair(location.latitude, location.longitude)
+        }
+        routeBusy = true
+        Toast.makeText(this, if (arabic) "جارٍ حساب المسار…" else "Calcul de l'itinéraire…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val result = runCatching {
+                graph.route(origin.first, origin.second, to.latitude, to.longitude) { false }
+            }.getOrNull()
+            runOnUiThread {
+                routeBusy = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (result == null) {
+                    Toast.makeText(
+                        this,
+                        if (arabic) "لم يتم العثور على مسار بين هذين المكانين" else "Aucun itinéraire trouvé entre ces deux endroits",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    showRoute(from, to, result)
+                }
+            }
+        }.start()
+    }
+
+    private fun formatRoute(result: RouteResult, arabic: Boolean): String {
+        val km = result.distanceMeters / 1000.0
+        val distance = if (km < 10) String.format(Locale.US, "%.1f", km) else km.roundToInt().toString()
+        val minutes = (result.seconds / 60.0).roundToInt().coerceAtLeast(1)
+        val hours = minutes / 60
+        val rest = minutes % 60
+        return if (arabic) {
+            val time = if (hours > 0) "$hours س $rest د" else "$rest د"
+            "$distance كم  ·  $time"
+        } else {
+            val time = if (hours > 0) "$hours h $rest min" else "$rest min"
+            "$distance km  ·  $time"
+        }
+    }
+
+    private fun showRoute(from: RoutePlace?, to: RoutePlace, result: RouteResult) {
+        val arabic = isArabic()
+        val builder = StringBuilder(result.latitudes.size * 24 + 128)
+        builder.append("{\"type\":\"Feature\",\"properties\":{},\"geometry\":{\"type\":\"LineString\",\"coordinates\":[")
+        for (i in result.latitudes.indices) {
+            if (i > 0) builder.append(',')
+            builder.append('[').append(result.longitudes[i]).append(',').append(result.latitudes[i]).append(']')
+        }
+        builder.append("]}}")
+        map?.style?.getSourceAs<GeoJsonSource>(ROUTE_SOURCE)?.setGeoJson(builder.toString())
+
+        val fromName = from?.label(arabic) ?: (if (arabic) "موقعي" else "Ma position")
+        routeCardTitle.text = if (arabic) "من $fromName إلى ${to.label(true)}" else "$fromName → ${to.label(false)}"
+        routeCardInfo.text = formatRoute(result, arabic)
+        routeCard.visibility = View.VISIBLE
+        routeShown = true
+
+        // On cadre tout le trajet ; le recentrage automatique est suspendu tant que le tracé est affiché.
+        pauseFollowing()
+        runCatching {
+            var north = -90.0
+            var south = 90.0
+            var east = -180.0
+            var west = 180.0
+            for (i in result.latitudes.indices) {
+                north = maxOf(north, result.latitudes[i])
+                south = minOf(south, result.latitudes[i])
+                east = maxOf(east, result.longitudes[i])
+                west = minOf(west, result.longitudes[i])
+            }
+            val bounds = LatLngBounds.from(north, east, south, west)
+            map?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, dp(70)))
+        }
+    }
+
+    private fun clearRoute() {
+        map?.style?.getSourceAs<GeoJsonSource>(ROUTE_SOURCE)?.setGeoJson("{\"type\":\"FeatureCollection\",\"features\":[]}")
+        routeCard.visibility = View.GONE
+        if (routeShown) {
+            routeShown = false
+            resumeFollowing()
+        }
     }
 
     private fun showStatus(text: String?) {
@@ -1077,6 +1527,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        routingGraph?.close()
         mapView.onDestroy()
         super.onDestroy()
     }

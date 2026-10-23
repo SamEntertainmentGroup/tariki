@@ -16,6 +16,7 @@ android {
         targetSdk = 34
         versionCode = providers.gradleProperty("versionCodeOverride").map { it.toInt() }.getOrElse(8)
         versionName = "0.8"
+        buildConfigField("String", "ROUTING_URL", "\"${providers.gradleProperty("routingUrl").getOrElse("https://github.com/SamEntertainmentGroup/tariki/releases/download/routes-latest/algeria-routing.bin.gz")}\"")
         buildConfigField("String", "ALERTS_URL", "\"${providers.gradleProperty("alertsUrl").getOrElse("https://jarti.app/wp-admin/admin-ajax.php")}\"")
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")

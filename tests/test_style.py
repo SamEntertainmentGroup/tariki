@@ -66,7 +66,7 @@ class StyleTest(unittest.TestCase):
         ids = [layer["id"] for layer in style["layers"]]
         self.assertEqual(len(ids), len(set(ids)))
         for layer in style["layers"]:
-            if layer["type"] == "background" or layer.get("source") == "alerts":
+            if layer["type"] == "background" or layer.get("source") in ("alerts", "route"):
                 continue
             self.assertEqual(layer["source"], "algeria")
             self.assertIn(layer["source-layer"], SOURCE_LAYERS)
@@ -211,6 +211,14 @@ class StyleTest(unittest.TestCase):
         # Bouton « cible » sans contour noir.
         button = kotlin.split('val locateButton =', 1)[1].split('root.addView(locateButton', 1)[0]
         self.assertNotIn("Color.BLACK", button)
+
+
+    def test_route_layers_sit_below_the_alerts(self):
+        style = json.loads(STYLE_PATH.read_text(encoding="utf-8"))
+        ids = [layer["id"] for layer in style["layers"]]
+        self.assertEqual(style["sources"]["route"]["type"], "geojson")
+        self.assertLess(ids.index("route-casing"), ids.index("route-line"))
+        self.assertLess(ids.index("route-line"), ids.index("alerts-cluster"))
 
 
 if __name__ == "__main__":

@@ -22,6 +22,16 @@ Deux workflows GitHub Actions :
 - Recherche 🔍 d'une ville, commune ou village (arabe ou français, sans accents).
 - Boutons AR / FR (langue des noms), Cap / Nord (rotation), ◎ (recentrer).
 
+## Itinéraires hors ligne entre villes
+
+3. **Build Algeria routing data** : lit les mêmes données OpenStreetMap que la carte (toutes les routes jusqu'aux rues résidentielles, plus les villes, villes moyennes et villages), fabrique un graphe routier pour toute l'Algérie (`tools/build_routing_graph.py`) et publie `algeria-routing.bin.gz` dans la Release `routes-latest`. À lancer une fois, puis quand on veut actualiser les routes. Il est indépendant de la carte.
+
+Dans l'appli, le bouton 🛣️ du menu télécharge ce fichier **une seule fois** (toute l'Algérie, avec barre de progression), puis permet de choisir un départ (« ma position » ou une ville) et une arrivée (ville ou commune) : l'itinéraire le plus rapide est tracé sur la carte avec la distance et la durée estimée. Pas de guidage, pas d'adresses.
+
+- Le fichier est lu directement dans le stockage du téléphone (rien n'est chargé en mémoire). Le calcul est un A* : les petites rues ne sont utilisées que près du départ et de l'arrivée ; si rien n'est trouvé, le rayon est élargi puis supprimé.
+- Les sens uniques sont respectés ; les interdictions de tourner ne le sont pas. Les durées sont estimées à partir d'une vitesse moyenne par type de route (ou de `maxspeed`), sans circulation.
+- Le format du fichier est décrit en tête de `tools/build_routing_graph.py` ; un test vérifie que le lecteur Kotlin et le fichier Python sont d'accord.
+
 ## Serveur
 
 L'appli utilise les mêmes actions `admin-ajax.php` que le site (`dztrafic_get_alerts`, `dztrafic_add_alert`, `dztrafic_confirm_alert` et leurs nonces) : les règles anti-spam, les durées de vie et la vérification de la route restent côté WordPress.
