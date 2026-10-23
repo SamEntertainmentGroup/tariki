@@ -1,0 +1,76 @@
+name: Build Algeria routing data
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y osmium-tool
+          osmium --version
+
+      - name: Run self-tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Download Geofabrik Algeria extract
+        run: |
+          mkdir -p work out
+          curl --fail --location --retry 5 --retry-delay 3 \
+            --output work/algeria.osm.pbf \
+            https://download.geofabrik.de/africa/algeria-latest.osm.pbf
+          ls -l work/algeria.osm.pbf
+
+      - name: Extract roads
+        run: |
+          osmium tags-filter --overwrite --output work/roads.osm.pbf work/algeria.osm.pbf \
+            w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,tertiary_link,unclassified,unclassified_link,residential,residential_link
+          osmium export --overwrite --geometry-types=linestring \
+            --output-format geojsonseq --output work/roads.geojsonseq work/roads.osm.pbf
+          ls -l work/roads.geojsonseq
+
+      - name: Extract cities, towns and villages
+        run: |
+          osmium tags-filter --overwrite --output work/places.osm.pbf work/algeria.osm.pbf \
+            n/place=city,town,village
+          osmium export --overwrite --geometry-types=point \
+            --output-format geojsonseq --output work/places.geojsonseq work/places.osm.pbf
+          ls -l work/places.geojsonseq
+
+      - name: Build routing graph
+        run: |
+          python3 tools/build_routing_graph.py \
+            --roads work/roads.geojsonseq --places work/places.geojsonseq \
+            --output out/algeria-routing.bin.gz --report out/routing-report.txt
+          { echo '```'; cat out/routing-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish routing data to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete routes-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create routes-latest --repo "$GITHUB_REPOSITORY" \
+            --title "Itinéraires Algérie (routes et lieux)" \
+            --notes "Générée par le workflow Build Algeria routing data, exécution ${{ github.run_number }}." \
+            out/algeria-routing.bin.gz out/routing-report.txt
+
+      - name: Upload routing data
+        uses: actions/upload-artifact@v4
+        with:
+          name: algeria-routing
+          path: |
+            out/algeria-routing.bin.gz
+            out/routing-report.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

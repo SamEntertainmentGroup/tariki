@@ -87,7 +87,7 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: gradle assembleDebug --no-daemon --stacktrace -PalertsUrl="$ALERTS_URL" -PversionCodeOverride="$GITHUB_RUN_NUMBER"
+        run: gradle assembleDebug --no-daemon --stacktrace -PalertsUrl="$ALERTS_URL" -ProutingUrl="https://github.com/$GITHUB_REPOSITORY/releases/download/routes-latest/algeria-routing.bin.gz" -PversionCodeOverride="$GITHUB_RUN_NUMBER"
 
       - name: Check APK content
         run: |
